@@ -939,18 +939,22 @@ details.acc.is-target {
 
 /* --- トースト --------------------------------------------------------------- */
 
-.toasts { position: fixed; right: 18px; bottom: 18px; z-index: 500;
-          display: flex; flex-direction: column; gap: 8px; }
+/* 画面右上に出す（右下は「未保存バー」と送信ボタンの居場所なので、そこには重ねない）。
+   新しいものほど下に積まれ、上から順に消えていく。 */
+.toasts { position: fixed; right: 18px; top: 18px; z-index: 500;
+          display: flex; flex-direction: column; gap: 10px; }
 .toast {
-    padding: 10px 15px; border-radius: var(--radius-sm); background: var(--surface);
+    padding: 14px 20px; border-radius: var(--radius-sm); background: var(--surface);
     border: 1px solid var(--border); box-shadow: var(--shadow-lg);
-    font-size: 13px; font-weight: 500; max-width: 420px;
+    font-size: 13.5px; font-weight: 500; line-height: 1.55;
+    min-height: 48px; display: flex; align-items: center;
+    max-width: 440px; min-width: 240px;
     animation: toastin .18s ease-out;
 }
 .toast--ok { border-left: 3px solid var(--ok); }
 .toast--err { border-left: 3px solid var(--err); }
 .toast--warn { border-left: 3px solid var(--warn); }
-@keyframes toastin { from { opacity: 0; transform: translateY(8px); } }
+@keyframes toastin { from { opacity: 0; transform: translateY(-8px); } }
 
 .spinner {
     width: 15px; height: 15px; border: 2px solid var(--border-2);

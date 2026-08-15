@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% block title %}{{ table }} — {{ app_title }}{% endblock %}
-{# 別タブで開く読み取り専用のビューア。表そのものに場所を使いたいので見出しは小さく持つ #}
+{# 別タブで開く読み取り専用のビューア。表そのものに場所を使いたいので、
+   見出しは小さく持ち、画面の幅と高さをいっぱいに使う（CSSの .is-table 参照）。 #}
+{% block body_class %}is-table{% endblock %}
 
 {% block sidebar %}
 <div class="sidebar__section">
@@ -32,7 +34,7 @@
       </select>
     </div>
 
-    <div class="tablewrap mt" id="tableBox" style="max-height:calc(100vh - 260px)">
+    <div class="tablewrap mt" id="tableBox">
       <div class="small muted" style="padding:10px"><span class="spinner"></span> 読み込み中…</div>
     </div>
 

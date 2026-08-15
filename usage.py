@@ -17,8 +17,8 @@ data/import_history.jsonl（取り込みの記録）。どちらも読むだけ�
 戻り値の形は advanced.py / business.py と同じ {"title", "tables", "notes", "meta"}。
 画面もLLMも同じ入れ物で受け取れる。
 
-注意: 発言ごとの時刻は保存していないので、時系列は会話の開始時刻で数える。
-      1本の会話が日をまたいでも、始めた日の1件として扱う。
+時系列は発言ごとの時刻（表示物の at）で数える。この仕組みを入れる前の
+古い会話には at が無いので、会話の開始時刻で代用し、その旨を所見に明示する。
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ METHODS = {
     "users": "利用者ごとの利用量",
     "trend": "日ごと・曜日・時間帯の推移",
     "tools": "呼ばれた機能の回数",
-    "databases": "対象データ（DB）別の利用",
+    "databases": "実際に使われたDB",
     "errors": "失敗の内訳と、直し方の当たり",
     "questions": "実際に聞かれた質問",
 }
@@ -377,7 +377,7 @@ def by_tool(records: list[dict]) -> dict:
 
 
 def by_database(records: list[dict]) -> dict:
-    """対象データ別。使われないDBは、選ばれていないのか、選べていないのか。"""
+    """DB別。会話の db_names は「実際にSQLが触ったDB」（選択UIは無い）。"""
     if not records:
         return _empty(None)
 
@@ -387,18 +387,18 @@ def by_database(records: list[dict]) -> dict:
     width_rows = [(f"{k} DB", v) for k, v in sorted(widths.items())]
 
     notes = [_period_note(records),
-             "「選択された会話数」なので、実際にSQLが当たったかまでは見ていません"
-             "（実際に通った結合はカタログの「利用状況」で見られます）。"]
+             "実際にSQLが触ったDBで数えています（この仕組みを入れる前の会話は、"
+             "当時選択されていたDBで数えます）。"]
     multi = sum(v for k, v in widths.items() if k >= 2)
     if records:
-        notes.append(f"2つ以上のDBを選んだ会話は {multi}/{len(records)} 件"
+        notes.append(f"2つ以上のDBを使った会話は {multi}/{len(records)} 件"
                      f"（{multi / len(records) * 100:.0f}%）。"
                      + ("DBをまたぐ分析が実際に行われています。" if multi else
                         "横断分析がまだ使われていません。"
                         "またぎの結合定義と例文を足すと使われやすくなります。"))
     return _out("対象データ別の利用",
                 [_table("DB別", ["DB", "会話数", "割合"], rows),
-                 _table("同時に選んだDBの数", ["選択数", "会話"], width_rows)],
+                 _table("1会話で使ったDBの数", ["DB数", "会話"], width_rows)],
                 notes, {"dbs": len(per)})
 
 

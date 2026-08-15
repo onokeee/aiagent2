@@ -16,15 +16,17 @@
 </div>
 
 <div class="sidebar__section">
-  <div class="sidebar__label">対象データ</div>
+  <div class="sidebar__label">データ</div>
   {% if not db_files %}
     <div class="small muted">data/ に .db がありません。<a href="{{ url_for('imp.index') }}">取り込み</a>から作成できます。</div>
+  {% else %}
+    <div class="small muted" style="margin-bottom:6px">
+      選ぶ必要はありません。質問に合わせて必要なデータをアプリが自動で使います。</div>
   {% endif %}
-  {# 名前にマウスを乗せると、カタログに書いた説明が出る（data-desc / common.js） #}
+  {# 一覧は「何があるか」を確かめるためのもの。名前にマウスを乗せると説明が出る #}
   {% for f in db_files %}
     <div class="dbpick" data-db="{{ f.name }}">
       <div class="dbpick__head">
-        <input type="checkbox" class="dbpick__all"{{ 'checked' if f.name in selection }}>
         <span class="dbpick__name"
               data-desc-title="{{ f.name }}{% if f.title %}（{{ f.title }}）{% endif %}"
               data-desc="{{ f.description }}{% if f.caveats %}{% for c in f.caveats %}
@@ -34,15 +36,12 @@
       </div>
       <div class="dbpick__tables">
         {% for t in f.tables %}
-          <label><input type="checkbox" class="dbpick__t" value="{{ t.name }}"
-            {{ 'checked' if (f.name not in selection) or (t.name in selection[f.name]) }}>
-            <span data-desc-title="{{ t.name }}" data-desc="{{ t.description }}"
+          <label><span data-desc-title="{{ t.name }}" data-desc="{{ t.description }}"
                   data-desc-meta="{{ '{:,}行'.format(t.rows) if t.rows is not none else '行数不明' }} / {{ t.columns }}列">{{ t.name }}</span></label>
         {% endfor %}
       </div>
     </div>
   {% endfor %}
-  <div class="small muted mt" id="scopeSummary"></div>
 </div>
 
 <div class="sidebar__section">

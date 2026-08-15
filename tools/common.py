@@ -65,6 +65,9 @@ def fetch(spec: dict, scope: list[dict], *, label: str | None = None):
         raise advanced.AnalysisError(
             "sql と result_id のどちらも指定されていません。"
             "新しくデータを取るなら sql を、前のツールの結果を使うなら result_id を指定してください。")
+    # スコープは質問ごとの自動判定なので、例文由来のSQLなどが範囲外のDBを
+    # 名指しすることがある。必要なぶんは繋いで実行する（読み取り専用のまま）。
+    scope = db.widen_scope(sql, scope)
     columns, rows, truncated = db.run_select(sql, scope)
     rid = results.put(scope, columns, rows, truncated, sql=sql, label=label)
     return columns, rows, truncated, rid, (_total_rows(sql, scope) if truncated else None)

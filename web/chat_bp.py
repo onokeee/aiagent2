@@ -29,8 +29,7 @@ import verify
 
 from . import filestore
 from .helpers import (admin_required, build_scope, dbs_in_sql, login_required,
-                      render_item_for_web, scope_starters, scope_summary,
-                      tables_in_sql)
+                      render_item_for_web, scope_starters, tables_in_sql)
 
 bp = Blueprint("chat", __name__)
 
@@ -90,33 +89,16 @@ def index():
                       "description": meta.get("description") or "",
                       "caveats": meta.get("caveats") or [],
                       "tables": tables})
-    selection = prefs.get_selection(g.user)
     return render_template(
         "chat.html",
         db_files=files,
-        selection=selection,
         chat_id=session.get("chat_id"),
         history=chats.list_chats(g.user),
-        starters=scope_starters(build_scope(selection)),
+        starters=scope_starters(build_scope({f.name: [] for f in db.list_db_files()})),
         llm_ready=llm.is_configured(),
         placeholder=config.APP_INPUT_PLACEHOLDER,
         auto_download=config.AUTO_DOWNLOAD,
     )
-
-
-# =============================================================================
-# スコープ（対象DB・テーブル）
-# =============================================================================
-
-@bp.post("/api/scope")
-@login_required
-def set_scope():
-    sel = request.json.get("selection") or {}
-    prefs.set_selection(g.user, sel)
-    scope = build_scope(prefs.get_selection(g.user))
-    # 例文は選んだDBによって変わるので、選択のたびに返して画面を差し替えさせる
-    return jsonify({"ok": True, "summary": scope_summary(scope, g.user),
-                    "starters": scope_starters(scope)})
 
 
 # =============================================================================
@@ -211,10 +193,16 @@ def _persist(chat: dict) -> dict:
         return chat
     if not chat.get("id"):
         chat["id"] = chats.new_id()
-    scope_sel = prefs.get_selection(g.user)
+    # db_names は「この会話で実際にSQLが触ったDB」。開いて続きを聞いたときに
+    # 同じDBをスコープへ残すために使う（_auto_scope 参照）。
+    used = set(chat.get("db_names") or [])
+    for i in chat["render_log"]:
+        if i.get("kind") == "sql" and i.get("sql"):
+            used |= set(db.dbs_named_in(str(i["sql"])))
+    chat["db_names"] = sorted(used)
     saved = chats.save_chat(
         g.user, chat["id"], chat["messages"], chat["render_log"],
-        db_names=list(scope_sel), tables=scope_sel,
+        db_names=chat["db_names"], tables={},
         title=chat.get("title") or "", created_at=chat.get("created_at") or "")
     session["chat_id"] = chat["id"]
     chat["title"], chat["created_at"] = saved["title"], saved["created_at"]
@@ -294,16 +282,13 @@ def open_chat():
     cid = request.json.get("id")
     if not cid:
         session.pop("chat_id", None)
-        return jsonify({"ok": True, "items": [], "selection": prefs.get_selection(g.user)})
+        return jsonify({"ok": True, "items": []})
     chat = chats.load_chat(g.user, cid)
     if chat is None:
         return jsonify({"error": "この会話は見つかりませんでした。"}), 404
     session["chat_id"] = cid
-    if chat.get("tables"):
-        prefs.set_selection(g.user, chat["tables"])
     return jsonify({"ok": True, "items": _web_log(chat.get("render_log") or []),
-                    "title": chat.get("title", ""),
-                    "selection": prefs.get_selection(g.user)})
+                    "title": chat.get("title", "")})
 
 
 @bp.post("/api/chat/delete")
@@ -557,6 +542,25 @@ def _turn_error(e: _TurnError):
     return jsonify(e.payload), e.status
 
 
+def _auto_scope(question: str, chat: dict) -> list[dict]:
+    """質問に合わせて対象DBを決める。利用者はDBを選ばない。
+
+    3つを合わせる:
+      ルーターが選んだDB … 質問と各DBの要約を突き合わせた前段の判定（llm.route_dbs）。
+                           無関係なDBのカタログを本番のプロンプトに入れないための要。
+      この会話で使ったDB … 「それをグラフに」のような続きの質問はルーターに手がかりが
+                           無いので、実際にSQLが触ったDBは残し続ける。
+      判定できないとき   … 全DB。ルーターの不調で答えられなくなるのがいちばん悪い。
+    """
+    all_names = [f.name for f in db.list_db_files()]
+    history = [i.get("content") or "" for i in (chat.get("render_log") or [])
+               if i.get("role") == "user" and i.get("kind") == "text"]
+    routed = llm.route_dbs(question, history)
+    names = set(routed if routed else all_names)
+    names |= set(chat.get("db_names") or [])          # この会話で実際に使ったDB
+    return build_scope({n: [] for n in all_names if n in names})
+
+
 def _begin_turn():
     """/send と /stream に共通する前処理。
 
@@ -569,15 +573,15 @@ def _begin_turn():
     if not llm.is_configured():
         raise _TurnError("LLMが未設定です。env の OPENAI_* を設定してください。")
 
-    scope = build_scope(prefs.get_selection(g.user))
+    chat = _load_current()
+    scope = _auto_scope(text, chat)
     if not scope:
-        raise _TurnError("先に対象のDBを選択してください。")
+        raise _TurnError("data/ に分析できるDBがありません。"
+                         "「データ取り込み」からDBを作成してください。")
 
     images, show = _images_from((request.json or {}).get("images"))
     if images and not models.is_vision(models.current(g.user)):
         raise _TurnError("いま選ばれているモデルは画像を扱えません。")
-
-    chat = _load_current()
     if not chat["messages"] or chat["messages"][0].get("role") != "system":
         chat["messages"].insert(0, {"role": "system", "content": ""})
     chat["messages"][0] = {"role": "system",
@@ -744,9 +748,9 @@ def rewind():
 
     if not llm.is_configured():
         return jsonify({"error": "LLMが未設定です。env の OPENAI_* を設定してください。"}), 400
-    scope = build_scope(prefs.get_selection(g.user))
+    scope = _auto_scope(text, chat)
     if not scope:
-        return jsonify({"error": "先に対象のDBを選択してください。"}), 400
+        return jsonify({"error": "data/ に分析できるDBがありません。"}), 400
 
     # やり直しなので、カタログの現状に合わせてシステムプロンプトも入れ直す
     if not chat["messages"] or chat["messages"][0].get("role") != "system":
@@ -862,9 +866,7 @@ def save_example():
 
     チャット画面から呼ぶがカタログを書き換えるので、カタログ画面と同じく管理者のみ。
     """
-    scope = build_scope(prefs.get_selection(g.user))
-    if not scope:
-        return jsonify({"error": "先に対象のDBを選択してください。"}), 400
+    scope = build_scope({f.name: [] for f in db.list_db_files()})
     q = (request.json.get("question") or "").strip()
     sql = (request.json.get("sql") or "").strip()
     if not q or not sql:

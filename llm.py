@@ -118,6 +118,64 @@ def _create(**kwargs):
     return client().chat.completions.create(**attempt)
 
 
+# --- DBルーター（質問に関係するDBだけを選ぶ） --------------------------------------
+
+_ROUTE_SYSTEM = """あなたはデータ分析アプリの振り分け係です。
+利用者の質問に答えるために必要なDBを、下のDB一覧から選んでください。
+
+出力はJSONの配列だけ（説明文は書かない）:
+  ["demo_sales.db", "demo_master.db"]
+
+守ること:
+- 質問の言葉とDBの説明・テーブル・用語を突き合わせて選ぶ。
+- 結合キーの一覧に他のDBの名前が出ていたら、そのDBも一緒に選ぶ
+  （例: 売上の質問で顧客名が要るなら、顧客マスタのあるDBも含める）。
+- 迷ったら含める。外しすぎて答えられないより、多めの方がよい。
+- 全DBが要る・判断できないときは ["*"] と書く。
+- 直前の会話の続き（「それを」「さっきの」）なら、その話題のDBを選ぶ。"""
+
+
+def route_dbs(question: str, history: list[str] | None = None) -> list[str] | None:
+    """質問に関係するDBファイル名を選ぶ。判断できなければ None（=全DB）。
+
+    本番の回答に無関係なDBのカタログを入れると、列やコード値の情報が薄まって
+    精度が下がる。そこで前段に小さな1回を挟み、要約だけを見せて選ばせる。
+    要約は全DBぶんでも詳細版の1/4ほどで、内容が変わらない限りキャッシュに乗る。
+
+    失敗したら None を返して全DBで進める。ルーターの不調で答えられなくなるのが
+    いちばん悪いので、この関数は例外を外に出さない。
+    """
+    import db                       # 循環importを避けるため、使うときに読む
+
+    files = db.list_db_files()
+    if len(files) <= 1:
+        return None
+    known = {f.name for f in files}
+    summaries = "\n".join(
+        catalog.db_text_cached(db.alias_for(f), f, None, full=False) for f in files)
+
+    ask = []
+    for h in (history or [])[-3:]:
+        ask.append(f"（直前の質問: {h}）")
+    ask.append(f"今回の質問: {question}")
+    try:
+        resp = _create(
+            model=config.OPENAI_MODEL,
+            messages=[{"role": "system", "content": _ROUTE_SYSTEM},
+                      {"role": "user", "content": f"{summaries}\n\n{chr(10).join(ask)}"}],
+            temperature=0, max_tokens=120,
+        )
+        m = re.search(r"\[.*?\]", resp.choices[0].message.content or "", re.DOTALL)
+        picked = json.loads(m.group(0)) if m else []
+    except Exception as e:
+        print(f"[router] 振り分けに失敗したため全DBで進めます: {e}")
+        return None
+    if "*" in picked:
+        return None
+    names = [str(p) for p in picked if str(p) in known]
+    return names or None
+
+
 # --- system prompt -----------------------------------------------------------
 
 def build_system_prompt(scope: list[dict], admin: bool = False) -> str:

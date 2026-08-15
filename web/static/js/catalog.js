@@ -15,6 +15,10 @@ function activateTab(pane) {
     if (!tab) return;
     $$('.tab').forEach(t => t.classList.toggle('is-active', t === tab));
     $$('.tabpane').forEach(p => p.classList.toggle('is-active', p.id === `pane-${pane}`));
+    // ツールはDBに属さない（全DB共通）。DBの切替と充実度メーターを見せたままだと
+    // 「選択中のDBのツール」と読めてしまうので、このタブでは隠す。
+    const end = $('.tabs__end');
+    if (end) end.style.display = (pane === 'tools') ? 'none' : '';
     if (pane === 'er') ER.refit();
     // 隠れているタブでは高さを測れないので、表示された瞬間に伸びる欄を測り直す
     if (pane === 'glossary') $$('#pane-glossary textarea').forEach(autoGrow);

@@ -43,9 +43,6 @@
         <button class="metric metric--link" data-jump="glossary" data-sec="ex" title="クリックで例文へ">
           <div class="metric__label">例文</div>
           <div class="metric__value" id="mEx">{{ coverage.examples }}</div></button>
-        <button class="metric metric--link" data-jump="tools" title="クリックでツールへ">
-          <div class="metric__label">ツール</div>
-          <div class="metric__value">{{ custom|length }}</div></button>
       </div>
       <select id="dbSel" style="width:auto">
         {% for f in db_files %}<option value="{{ f }}" {{ 'selected' if f == target }}>{{ f }}</option>{% endfor %}
@@ -285,12 +282,14 @@
   <!-- ================= ツール ================= -->
   <div class="tabpane" id="pane-tools">
     <div class="card">
-      <div class="card__title">ユーザー定義ツール</div>
+      <div class="card__title">ユーザー定義ツール
+        <span class="badge">全DB共通</span></div>
       <div class="card__desc">
         AIが呼び出せる専用ツールです。よく聞かれることを登録しておくと、
         AIが毎回SQLを書き起こさずに済み、答えのぶれもなくなります。<br>
+        <b>特定のDBには属しません。</b>上のDB切替と関係なく、ここには全ツールが並びます。<br>
         <b>やりたいことを日本語で書くだけで作れます。</b>SQLも設定も要りません。
-        AIがSQLを組み立て、毎回変える値も自分で見つけ、
+        AIが全DBのカタログを見て使うDB・テーブルを自分で決め、SQLを組み立て、
         実際のデータで動かした結果を見せてから登録します。
       </div>
       <div id="toolList"></div>

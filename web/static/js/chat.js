@@ -86,76 +86,15 @@ async function attachImages(files) {
     }
 }
 
-/* --- 対象データの選択 -------------------------------------------------------- */
-
-function selection() {
-    const out = {};
-    $$('.dbpick').forEach(box => {
-        if (!$('.dbpick__all', box).checked) return;
-        out[box.dataset.db] = $$('.dbpick__t', box).filter(c => c.checked).map(c => c.value);
-    });
-    return out;
-}
-
-/* 選択中の要約。選びすぎるとAIに列名が渡らなくなるので、そのときは知らせる。
-   「AIが列を知らない状態」は画面を見ても分からず、
-   「そんな列は無い」という誤った答えの原因になる。 */
-function renderScopeSummary(s) {
-    const box = $('#scopeSummary');
-    if (!s.dbs) {
-        box.replaceChildren('未選択');
-        return;
-    }
-    box.replaceChildren(
-        `選択中: ${s.dbs} DB / ${s.tables} テーブル`
-        + (s.custom_tools ? ` / 専用ツール ${s.custom_tools} 個` : ''));
-
-    // いま選んでいるモデルの「読める量」に対して、どれだけ使っているか
-    const b = s.budget;
-    if (b) {
-        box.append(el('div', {
-            class: 'small muted mt',
-            title: `カタログ ${b.catalog_chars.toLocaleString()} 字 ＋ ツール定義で`
-                   + ` 約 ${b.now_tokens.toLocaleString()} トークン。`
-                   + `${b.model} が一度に読めるのは ${b.context.toLocaleString()} トークン`
-                   + `${b.context_known ? '' : '（推定）'}。残りは会話の履歴と回答に使われます。`,
-        }, `${b.model} の余裕: 残り ${b.headroom_pct}%`));
-    }
-
-    if (s.columns_inlined === false) {
-        box.append(el('div', {
-            class: 'alert alert--warn small mt',
-            title: '選択中のDBが多いと、カタログ全文がプロンプトに収まらず、'
-                   + 'テーブルの説明までしか渡せません。',
-        }, '選択が多いため、AIには列名が渡っていません。'
-           + 'AIは必要に応じて調べますが、対象を絞ると精度と速度が上がります。'));
-    }
-}
-
-async function pushScope() {
-    try {
-        const r = await api('/api/scope', { selection: selection() });
-        const s = r.summary;
-        renderScopeSummary(s);
-        // 例文は選んだDBのカタログ由来なので、まだ何も話していなければ描き直す
-        starters = r.starters || { examples: [], tables: [] };
-        showEmpty();
-    } catch (e) { toast(e.message, 'err'); }
-}
+/* --- 対象データ（一覧表示のみ） ------------------------------------------------
+   選択UIは無い。どのDBを使うかは質問ごとにアプリが自動で決める。
+   一覧はクリックで開閉でき、中身（テーブルと説明）を確かめられる。 */
 
 function wireScope() {
     $$('.dbpick').forEach(box => {
-        const all = $('.dbpick__all', box);
-        if (all.checked) box.classList.add('is-open');
-        $('.dbpick__head', box).addEventListener('click', ev => {
-            if (ev.target === all) return;
+        $('.dbpick__head', box).addEventListener('click', () => {
             box.classList.toggle('is-open');
         });
-        all.addEventListener('change', () => {
-            box.classList.toggle('is-open', all.checked);
-            pushScope();
-        });
-        $$('.dbpick__t', box).forEach(c => c.addEventListener('change', pushScope));
     });
 }
 
@@ -202,20 +141,8 @@ async function openChat(id) {
     lastRole = null;
     r.items.forEach(addItem);
     replaying = false;
-    applySelection(r.selection || {});
     refreshHistory();
     scrollDown(true);
-}
-
-function applySelection(sel) {
-    $$('.dbpick').forEach(box => {
-        const on = Object.prototype.hasOwnProperty.call(sel, box.dataset.db);
-        $('.dbpick__all', box).checked = on;
-        box.classList.toggle('is-open', on);
-        const want = new Set(sel[box.dataset.db] || []);
-        $$('.dbpick__t', box).forEach(c => { c.checked = !on || want.has(c.value); });
-    });
-    pushScope();
 }
 
 /* --- 描画 ------------------------------------------------------------------- */
@@ -829,7 +756,6 @@ document.addEventListener('DOMContentLoaded', () => {
     starters = window.CHAT_INIT.starters || { examples: [], tables: [] };
     showEmpty();
     wireScope();
-    pushScope();
     renderHistory(window.CHAT_INIT.history || []);
     if (currentChatId) openChat(currentChatId);
 

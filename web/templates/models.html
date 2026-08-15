@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}モデル設定 — {{ app_title }}{% endblock %}
+{# 見出しは置かない。画面の説明はサイドバーの項目にマウスを乗せると出る #}
+
+{% block body %}
+<div class="content">
+  <div id="banner"></div>
+
+  <details class="card" id="howto">
+    <summary class="card__title" style="cursor:pointer">この画面の使い方</summary>
+    <div class="card__desc" style="margin-top:8px">
+      APIが返すモデルは100件を超えることもあり、その中には旧世代のものや
+      チャットに使えないものが混ざっています。そのまま利用者に見せると選び間違えるので、
+      <b>ここで「使ってよいモデル」を決めます</b>。
+      <ol style="margin:8px 0 0 18px;padding:0;line-height:1.9">
+        <li>「一覧から選ぶ」で、使わせたいモデルにチェックを入れる</li>
+        <li>「既定のモデル」で、まだ自分で選んでいない利用者が使うものを決める</li>
+        <li>下の「設定を保存」を押す</li>
+      </ol>
+      <div class="mt">
+        保存すると、チャット画面のプルダウンは<b>ここで選んだモデルだけ</b>になります。
+        候補から外したモデルを選んでいた利用者は、次の質問から既定のモデルに変わります。
+      </div>
+    </div>
+  </details>
+
+  <div class="card">
+    <div class="card__title">選択できるモデル</div>
+    <div class="card__desc">
+      ここに登録したモデルだけが、チャット画面のプルダウンに出ます。
+      候補から外すと、既にそのモデルを選んでいた利用者も既定のモデルに戻ります。
+    </div>
+    <div id="modelList"></div>
+    <div class="row mt">
+      <button class="btn btn--sm btn--primary" id="pickModel">一覧から選ぶ</button>
+      <input type="text" id="newModel" class="grow" style="max-width:300px"
+             placeholder="一覧に無い名前を直接入力" list="catalogList">
+      <datalist id="catalogList"></datalist>
+      <button class="btn btn--sm" id="addModel">＋ 追加</button>
+      <div class="spacer"></div>
+      <button class="btn btn--ghost btn--sm" id="refresh"
+              title="APIに問い合わせて、使えるモデルの一覧を取り直します">一覧を取得</button>
+    </div>
+    <div id="catalogHint" class="small muted mt"></div>
+  </div>
+
+  <div class="card">
+    <div class="card__title">既定のモデル</div>
+    <div class="card__desc">
+      まだ自分で選んでいない利用者が使うモデルです。上の候補から選びます。
+    </div>
+    <div style="max-width:320px">
+      <select id="defaultModel"></select>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__title">画像を扱えるモデルの判定</div>
+    <div class="card__desc">
+      モデル名にこの文字列が含まれていれば「画像を送れる」と判断します
+      （部分一致・大文字小文字は区別しません）。
+      判定を誤ると、画像を送れないモデルに画像を渡して失敗します。
+    </div>
+    <div id="visionList"></div>
+    <div class="row mt">
+      <input type="text" id="newVision" class="grow" style="max-width:280px"
+             placeholder="例: gpt-4o">
+      <button class="btn btn--sm" id="addVision">＋ 追加</button>
+    </div>
+    <div id="visionPreview" class="mt"></div>
+  </div>
+
+  <div class="card">
+    <div class="card__title">AIに渡すデータカタログの量</div>
+    <div class="card__desc">
+      データカタログ（テーブル・列の説明、コード値、サンプル行）は、
+      この文字数までなら<b>そのまま全部</b>AIに渡ります。超えるとテーブル名と説明だけの
+      要約に切り替わり、<b>列名が1つも渡らなくなります</b>。
+      「その列は無い」という誤答は、たいていこれが原因です。<br>
+      大きくすると1回の質問で読む量が増えますが、内容が変わらない限り
+      プロンプトキャッシュが効くため、2回目以降の速度と費用への影響はわずかです。
+    </div>
+    <div class="row" style="align-items:flex-end">
+      <div style="width:200px">
+        <label class="field">上限（文字数）</label>
+        <input type="number" id="inlineLimit" step="1000">
+      </div>
+      <div class="grow" id="limitNow"></div>
+    </div>
+    <div id="limitBar" class="mt"></div>
+    <div id="modelBudget" class="mt"></div>
+  </div>
+
+  <div class="row mb">
+    <button class="btn btn--primary" id="save">設定を保存</button>
+    <div class="spacer"></div>
+    <button class="btn btn--ghost btn--sm" id="reload">読み直す</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>window.MODELS = {{ status|tojson }};</script>
+<script src="{{ url_for('static', filename='js/models.js') }}"></script>
+{% endblock %}

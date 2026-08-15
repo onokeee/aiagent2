@@ -1,0 +1,648 @@
+/* ER図キャンバス。ライブラリなしで、テーブル移動・関連のドラッグ作成・
+   多重度の変更・削除・元に戻す・拡大縮小をまかなう。
+
+   座標系は2つ。
+     world  … ノードが持つ論理座標（.meta.yaml の er_layout と同じ）
+     screen … 画面のピクセル。world に translate(tx,ty) scale(k) をかけたもの */
+
+const ER = (() => {
+    let data = { nodes: [], edges: [], alias: '' };
+    let view = { tx: 40, ty: 40, k: 1 };
+    let selected = null;          // {type:'edge'|'table', ...}
+    let undoStack = [];
+    let root, viewport, world, svg, panel;
+    // 過去の分析で実際に使われた結合の回数（{ "a.t.c||a.t.c": n }）。
+    // 宣言された関連の上に「本当に通っている道」を重ねるためのもの。
+    let usage = null;
+    let showUsage = true;
+    // 他DBから「こちらを参照している」テーブル。マスタ系DBでは数が多くなり、
+    // 自分のテーブルが埋もれるので既定では出さない。
+    let showIncoming = false;
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const CARDS = ['N:1', '1:N', '1:1', 'N:M'];
+
+    /* --- 描画 ---------------------------------------------------------------- */
+
+    function applyView() {
+        world.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.k})`;
+        svg.style.transform = world.style.transform;
+    }
+
+    function tableEl(n) {
+        // 他DBから借りたテーブルは薄く・破線で描き、どのDBのものかを見出しに出す。
+        // 中身の編集はそのDBのカタログで行う（ここでは線をつなぐためだけに置く）
+        const box = el('div', {
+            class: 'ertable' + (n.external ? ' ertable--ext' : ''),
+            'data-id': n.id, style: `left:${n.x}px; top:${n.y}px`,
+        },
+            el('div', { class: 'ertable__head' },
+                n.external ? el('div', { class: 'ertable__db' }, n.alias) : null,
+                el('div', {}, n.table),
+                el('div', { class: 'rows' },
+                    n.rows === null || n.rows === undefined ? '行数不明' : `${n.rows.toLocaleString()}行`)));
+        n.columns.forEach(c => {
+            box.append(el('div', {
+                class: 'ercol' + (c.pk ? ' pk' : '') + (c.fk ? ' fk' : ''),
+                'data-col': c.name,
+            },
+                // 接続点は左右どちらにも置く。相手が左にあるときは左から引けたほうが自然なため。
+                el('div', { class: 'erhandle erhandle--l', 'data-handle': c.name, 'data-side': 'left' }),
+                el('span', { class: 'ercol__name' }, c.name),
+                el('span', { class: 'ercol__type' }, c.type),
+                el('div', { class: 'erhandle erhandle--r', 'data-handle': c.name, 'data-side': 'right' })));
+        });
+        return box;
+    }
+
+    /** 列の接続点（world座標）。DOMの実寸から取るのでフォント差に強い。 */
+    function anchor(tableId, colName, side) {
+        const box = world.querySelector(`.ertable[data-id="${CSS.escape(tableId)}"]`);
+        if (!box) return null;
+        const node = data.nodes.find(n => n.id === tableId);
+        const col = box.querySelector(`.ercol[data-col="${CSS.escape(colName)}"]`);
+        const y = node.y + (col ? col.offsetTop + col.offsetHeight / 2 : 14);
+        const x = side === 'left' ? node.x : node.x + box.offsetWidth;
+        return { x, y, w: box.offsetWidth };
+    }
+
+    function edgePath(e) {
+        const [fa, ft, fc] = e.from, [ta, tt, tc] = e.to;
+        const fid = `${fa}.${ft}`, tid = `${ta}.${tt}`;
+        const fn = data.nodes.find(n => n.id === fid), tn = data.nodes.find(n => n.id === tid);
+        if (!fn || !tn) return null;
+        const fromRight = fn.x <= tn.x;
+        const a = anchor(fid, fc, fromRight ? 'right' : 'left');
+        const b = anchor(tid, tc, fromRight ? 'left' : 'right');
+        if (!a || !b) return null;
+        const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
+        const c1 = fromRight ? a.x + dx : a.x - dx;
+        const c2 = fromRight ? b.x - dx : b.x + dx;
+        // 3次ベジェの中点。t=0.5 を代入すると (P0 + 3P1 + 3P2 + P3) / 8 になる
+        const mid = { x: (a.x + 3 * c1 + 3 * c2 + b.x) / 8, y: (a.y + 3 * a.y + 3 * b.y + b.y) / 8 };
+        return { d: `M ${a.x} ${a.y} C ${c1} ${a.y}, ${c2} ${b.y}, ${b.x} ${b.y}`, a, b, mid };
+    }
+
+    /* 利用状況のキー。端点の並び順に依らないよう、文字列順で正規化する */
+    function usageKey(e) {
+        const a = e.from.join('.'), b = e.to.join('.');
+        return a <= b ? `${a}||${b}` : `${b}||${a}`;
+    }
+
+    /* --- 利用回数の色（濃さ）------------------------------------------------------
+       回数は片寄る（よく使う1本が何十回、残りは0〜数回）ので、対数で段を作る。
+       いちばん多い線を濃さ1として、その中での位置で色を決める。 */
+
+    function rgb(varName) {
+        const v = getComputedStyle(document.documentElement)
+            .getPropertyValue(varName).trim();
+        const m = v.match(/^#?([0-9a-f]{6})$/i);
+        if (m) {
+            const n = parseInt(m[1], 16);
+            return [n >> 16 & 255, n >> 8 & 255, n & 255];
+        }
+        const p = v.match(/\d+/g);
+        return p ? p.slice(0, 3).map(Number) : [128, 128, 128];
+    }
+
+    /** 未使用（薄い）→ よく使う（濃い）の間を、0〜1の位置で混ぜる。 */
+    function ramp(t, hot) {
+        const a = rgb('--border-2'), b = rgb(hot);
+        const c = a.map((v, i) => Math.round(v + (b[i] - v) * Math.min(1, Math.max(0, t))));
+        return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+
+    /** その図の中で、いちばん多く使われた回数（濃さの基準）。 */
+    function usageMax() {
+        if (!usage) return 0;
+        return data.edges.reduce((m, e) => Math.max(m, usage[usageKey(e)] || 0), 0);
+    }
+
+    function drawEdges() {
+        svg.replaceChildren();
+        const marks = [], counts = [];
+        const top = usageMax();
+        data.edges.forEach(e => {
+            const p = edgePath(e);
+            if (!p) return;
+            const on = selected?.type === 'edge' && selected.id === e.id;
+            // 実際に使われた回数。null は「重ね表示オフ or 未取得」
+            const count = (usage && showUsage) ? (usage[usageKey(e)] || 0) : null;
+
+            // 当たり判定用の太い透明な線。見える線は細いので、
+            // これが無いと1px幅を狙わされて実質クリックできない。
+            const hit = document.createElementNS(NS, 'path');
+            hit.setAttribute('d', p.d);
+            hit.setAttribute('fill', 'none');
+            hit.setAttribute('stroke', 'transparent');
+            hit.setAttribute('stroke-width', '16');
+            hit.style.cursor = 'pointer';
+            if (count !== null) {
+                const tip = document.createElementNS(NS, 'title');
+                tip.textContent = count
+                    ? `過去の分析で ${count} 回使われた結合`
+                    : '過去の分析では一度も使われていない結合（検算されていない経路）';
+                hit.append(tip);
+            }
+            // pointerdown を止めるのが肝。止めないとキャンバスのパン処理が走り、
+            // その中の再描画でこのパス自体が差し替わって click が発火しなくなる。
+            hit.addEventListener('pointerdown', ev => ev.stopPropagation());
+            hit.addEventListener('click', ev => { ev.stopPropagation(); selectEdge(e); });
+            svg.append(hit);
+
+            const path = document.createElementNS(NS, 'path');
+            path.setAttribute('d', p.d);
+            path.setAttribute('fill', 'none');
+            // 太さは使わず、色の濃さで回数を表す。太さを変えると、
+            // 線が重なったときにどれが太いのか分からなくなるため。
+            // DBまたぎは線の刻み方（破線の長さ）で見分ける。
+            path.setAttribute('stroke-width', on ? 2.6 : 1.6);
+            if (on) {
+                path.setAttribute('stroke', 'var(--accent)');
+            } else if (count === null) {
+                path.setAttribute('stroke', e.kind === 'fk' ? 'var(--muted)' : 'var(--text)');
+            } else {
+                // 対数で位置を出す。1回でもはっきり色が付くよう下駄を履かせる
+                const t = top > 0 && count > 0
+                    ? 0.25 + 0.75 * (Math.log(1 + count) / Math.log(1 + top))
+                    : 0;
+                path.setAttribute('stroke', ramp(t, e.cross ? '--cross' : '--accent'));
+            }
+            if (e.kind === 'fk') path.setAttribute('stroke-dasharray', '5 4');
+            else if (e.cross) path.setAttribute('stroke-dasharray', '11 5');
+            path.setAttribute('pointer-events', 'none');   // 当たり判定は hit に任せる
+            svg.append(path);
+
+            // 多重度は線の両端に置く（IPA表記なので矢印は使わない）
+            const parts = String(e.label || '').split(/[-]/).map(s => s.trim()).filter(Boolean);
+            const [l, r] = parts.length === 2 ? parts : ['*', '1'];
+            marks.push([p.a, l, p.a.x < p.b.x ? 14 : -14, on],
+                       [p.b, r, p.b.x > p.a.x ? -14 : 14, on]);
+
+            // 累積の使用回数を線の中ほどに置く。0 は「一度も検算されていない経路」
+            if (count !== null) counts.push([p.mid, count]);
+        });
+        marks.forEach(([pt, text, dx, on]) => {
+            if (!text) return;
+            const t = document.createElementNS(NS, 'text');
+            t.setAttribute('x', pt.x + dx);
+            t.setAttribute('y', pt.y + 4);
+            t.setAttribute('text-anchor', 'middle');
+            t.setAttribute('class', 'er__edgelabel' + (on ? ' is-selected' : ''));
+            t.textContent = text;
+            svg.append(t);
+        });
+
+        // 使用回数は最後にまとめて描く。線の上に重なるので、
+        // 白抜きの座布団を敷いてから数字を置く（細い線の上でも読めるように）
+        counts.forEach(([pt, n]) => {
+            const label = n ? `${n.toLocaleString()}回` : '未使用';
+            // 和文と数字で字幅が倍ほど違うので、文字種ごとに足す
+            const w = [...label].reduce((s, c) => s + (/[　-鿿]/.test(c) ? 10.5 : 6), 0) + 10;
+            const h = 15;
+            const box = document.createElementNS(NS, 'rect');
+            box.setAttribute('x', pt.x - w / 2); box.setAttribute('y', pt.y - h / 2);
+            box.setAttribute('width', w); box.setAttribute('height', h);
+            box.setAttribute('rx', 7);
+            box.setAttribute('class', 'er__countbg' + (n ? '' : ' is-zero'));
+            svg.append(box);
+
+            const t = document.createElementNS(NS, 'text');
+            t.setAttribute('x', pt.x);
+            t.setAttribute('y', pt.y + 4);
+            t.setAttribute('text-anchor', 'middle');
+            t.setAttribute('class', 'er__count' + (n ? '' : ' is-zero'));
+            t.textContent = label;
+            svg.append(t);
+        });
+    }
+
+    /** 画面に出すノード。隠したノードへ向かう線は anchor() が null を返すので
+        自動的に描かれない（edgePath 側で特別扱いしなくてよい）。 */
+    function shownNodes() {
+        return data.nodes.filter(n => showIncoming || !n.incoming);
+    }
+
+    function render() {
+        world.replaceChildren(...shownNodes().map(tableEl));
+        wireNodes();
+        drawEdges();
+        applyView();
+        syncIncomingUi();
+    }
+
+    function syncIncomingUi() {
+        const btn = $('#erIncoming');
+        if (!btn) return;
+        const n = data.nodes.filter(x => x.incoming).length;
+        btn.classList.toggle('hidden', !n);
+        btn.classList.toggle('btn--primary', showIncoming);
+        btn.textContent = showIncoming ? `参照元を隠す（${n}）` : `参照元を表示（${n}）`;
+    }
+
+    /* --- 選択パネル ------------------------------------------------------------ */
+
+    function closePanel() { selected = null; panel.classList.add('hidden'); drawEdges(); syncSelection(); }
+
+    function syncSelection() {
+        world.querySelectorAll('.ertable').forEach(b =>
+            b.classList.toggle('is-selected', selected?.type === 'table' && selected.id === b.dataset.id));
+    }
+
+    function selectEdge(e) {
+        selected = { type: 'edge', id: e.id, edge: e };
+        drawEdges(); syncSelection();
+        panel.classList.remove('hidden');
+        panel.replaceChildren(
+            el('div', { class: 'row', style: 'align-items:center' },
+                el('b', { class: 'grow' }, '関連'),
+                el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
+                               onclick: closePanel }, icon('x', 'icon--sm'))),
+            el('div', { class: 'small mono mb' },
+                `${e.from.join('.')}\n${e.to.join('.')}`),
+            e.kind === 'fk'
+                ? el('div', { class: 'alert alert--info small' },
+                    'DBに FOREIGN KEY として宣言された関連です。ここからは変更・削除できません。')
+                : !e.editable
+                ? el('div', { class: 'alert alert--info small' },
+                    `この関連は ${e.owner} 側で管理されています。`
+                    + `変更するには、右上のプルダウンで ${e.owner} に切り替えてください。`)
+                : el('div', {},
+                    el('div', { class: 'small muted mb' }, `多重度（現在 ${e.cardinality}）`),
+                    el('div', { class: 'row mb' }, CARDS.map(c =>
+                        el('button', {
+                            class: 'btn btn--sm' + (c === e.cardinality ? ' btn--primary' : ''),
+                            onclick: () => mutate({ action: 'update', index: e.index, cardinality: c }),
+                        }, c))),
+                    el('button', {
+                        class: 'btn btn--sm btn--danger',
+                        onclick: () => { if (confirm('この関連を削除しますか？')) mutate({ action: 'delete', index: e.index }); },
+                    }, '削除')));
+    }
+
+    function selectTable(id) {
+        const n = data.nodes.find(x => x.id === id);
+        if (!n) return;
+        selected = { type: 'table', id };
+        drawEdges(); syncSelection();
+        panel.classList.remove('hidden');
+
+        // 借りたテーブルは中身をいじらせない。主キーや説明は持ち主のDBで直す
+        if (n.external) {
+            panel.replaceChildren(
+                el('div', { class: 'row', style: 'align-items:center' },
+                    el('b', { class: 'grow' }, `${n.alias}.${n.table}`),
+                    el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
+                                   onclick: closePanel }, icon('x', 'icon--sm'))),
+                el('div', { class: 'alert alert--info small' },
+                    `${n.alias} のテーブルです。線をつなぐために置いています。`
+                    + '主キーや説明は、そのDBのカタログで編集してください。'),
+                // 関連が指しているから置かれているものは、外しても線の行き先が
+                // 無くなるだけなので外させない。手で足したものだけ外せる
+                n.pinned ? el('button', {
+                    class: 'btn btn--sm', style: 'margin-top:8px',
+                    onclick: async () => {
+                        try {
+                            const r = await api('/api/catalog/er-external',
+                                { db: CAT.db, action: 'remove', table: n.id });
+                            applyEr(r.er); closePanel();
+                            toast(`${n.id} をキャンバスから外しました。`);
+                        } catch (err) { toast(err.message, 'err'); }
+                    },
+                }, 'キャンバスから外す')
+                : el('div', { class: 'small muted', style: 'margin-top:8px' },
+                    n.incoming
+                        ? `${n.alias} 側の関連がこのDBを指しているので置いています。`
+                        : 'このDBの関連が指しているので置いています。関連を消すと消えます。'));
+            return;
+        }
+
+        const checks = n.columns.map(c => el('label',
+            { style: 'display:flex;gap:6px;align-items:center;font-size:12px' },
+            el('input', { type: 'checkbox', 'data-pk': c.name, ...(c.pk ? { checked: 'checked' } : {}) }),
+            c.name));
+        panel.replaceChildren(
+            el('div', { class: 'row', style: 'align-items:center' },
+                el('b', { class: 'grow' }, `${n.table}`),
+                el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
+                               onclick: closePanel }, icon('x', 'icon--sm'))),
+            el('div', { class: 'small muted mb' }, '主キーにする列（鍵＝実線の下線）'),
+            el('div', { style: 'max-height:190px;overflow:auto;margin-bottom:10px' }, checks),
+            el('button', {
+                class: 'btn btn--primary btn--sm',
+                onclick: async () => {
+                    const cols = [...panel.querySelectorAll('[data-pk]')]
+                        .filter(c => c.checked).map(c => c.dataset.pk);
+                    pushUndo();
+                    const r = await api('/api/catalog/primary-key',
+                        { db: CAT.db, table: n.table, columns: cols });
+                    data = r.er; render(); closePanel(); toast('主キーを保存しました。');
+                },
+            }, '保存'));
+    }
+
+    /* --- 変更（サーバに保存して描き直す） ---------------------------------------- */
+
+    function pushUndo() {
+        undoStack.push(JSON.parse(JSON.stringify({ nodes: data.nodes, edges: data.edges })));
+        if (undoStack.length > 20) undoStack.shift();
+        $('#erUndo').disabled = false;
+    }
+
+    /** サーバから返ってきた図を反映する。画面上の位置は動かさない
+        （まだ保存していない配置を、関連を1本足しただけで捨てないため）。 */
+    function applyEr(er) {
+        const positions = Object.fromEntries(data.nodes.map(n => [n.id, [n.x, n.y]]));
+        data = er;
+        data.nodes.forEach(n => { if (positions[n.id]) [n.x, n.y] = positions[n.id]; });
+        render();
+    }
+
+    async function mutate(body, silent) {
+        try {
+            if (!silent) pushUndo();
+            const r = await api('/api/catalog/relationship', { db: CAT.db, ...body });
+            applyEr(r.er); closePanel();
+        } catch (e) { toast(e.message, 'err'); }
+    }
+
+    /* --- 操作 ------------------------------------------------------------------ */
+
+    function wireNodes() {
+        world.querySelectorAll('.ertable').forEach(box => {
+            const node = data.nodes.find(n => n.id === box.dataset.id);
+
+            $('.ertable__head', box).addEventListener('pointerdown', ev => {
+                ev.stopPropagation();
+                const sx = ev.clientX, sy = ev.clientY, ox = node.x, oy = node.y;
+                let moved = false;
+                const move = e2 => {
+                    node.x = ox + (e2.clientX - sx) / view.k;
+                    node.y = oy + (e2.clientY - sy) / view.k;
+                    box.style.left = `${node.x}px`; box.style.top = `${node.y}px`;
+                    moved = true; drawEdges();
+                };
+                const up = () => {
+                    document.removeEventListener('pointermove', move);
+                    document.removeEventListener('pointerup', up);
+                    if (!moved) selectTable(node.id);
+                };
+                document.addEventListener('pointermove', move);
+                document.addEventListener('pointerup', up);
+            });
+
+            box.querySelectorAll('.erhandle').forEach(h => {
+                h.addEventListener('pointerdown', ev => {
+                    ev.stopPropagation(); ev.preventDefault();
+                    startLink(node, h.dataset.handle, h.dataset.side, ev);
+                });
+            });
+        });
+    }
+
+    function startLink(fromNode, fromCol, side, ev) {
+        const ghost = document.createElementNS(NS, 'path');
+        ghost.setAttribute('fill', 'none');
+        ghost.setAttribute('stroke', 'var(--accent)');
+        ghost.setAttribute('stroke-width', '2');
+        ghost.setAttribute('stroke-dasharray', '5 4');
+        svg.append(ghost);
+        const a = anchor(fromNode.id, fromCol, side || 'right');
+        const out = (side === 'left') ? -60 : 60;
+
+        const toWorld = e => {
+            const r = viewport.getBoundingClientRect();
+            return { x: (e.clientX - r.left - view.tx) / view.k, y: (e.clientY - r.top - view.ty) / view.k };
+        };
+        const move = e2 => {
+            const p = toWorld(e2);
+            ghost.setAttribute('d',
+                `M ${a.x} ${a.y} C ${a.x + out} ${a.y}, ${p.x - out} ${p.y}, ${p.x} ${p.y}`);
+        };
+        const up = e2 => {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', up);
+            ghost.remove();
+            const target = document.elementFromPoint(e2.clientX, e2.clientY)?.closest('.ercol');
+            const box = target?.closest('.ertable');
+            if (!target || !box) return;
+            const toNode = data.nodes.find(n => n.id === box.dataset.id);
+            if (toNode.id === fromNode.id && target.dataset.col === fromCol) return;
+            if (fromNode.external && toNode.external) {
+                toast('どちらか一方は、いま開いているDBのテーブルにしてください。', 'err');
+                return;
+            }
+            // 他DBのテーブルは 'DB名.テーブル名' で送る（サーバ側がDBまたぎと解する）
+            const ref = n => (n.external ? n.id : n.table);
+            mutate({
+                action: 'add',
+                from_table: ref(fromNode), from_column: fromCol,
+                to_table: ref(toNode), to_column: target.dataset.col,
+                cardinality: guessCardinality(fromNode, fromCol, toNode, target.dataset.col),
+            });
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+    }
+
+    /** 「その列がそのテーブルの主キー全体なら 1 側」という規則で多重度を推定する。 */
+    function guessCardinality(fromNode, fromCol, toNode, toCol) {
+        const solePk = (node, col) => {
+            const pks = node.columns.filter(c => c.pk).map(c => c.name);
+            return pks.length === 1 && pks[0] === col;
+        };
+        const a = solePk(fromNode, fromCol), b = solePk(toNode, toCol);
+        if (a && b) return '1:1';
+        if (b) return 'N:1';
+        if (a) return '1:N';
+        return 'N:M';
+    }
+
+    /* --- 他DBのテーブルを借りる ------------------------------------------------- */
+
+    async function openExternalPicker() {
+        let list;
+        try {
+            list = await api(`/api/catalog/er-tables?db=${encodeURIComponent(CAT.db)}`,
+                             undefined, 'GET');
+        } catch (e) { return toast(e.message, 'err'); }
+        if (!list.dbs.length) return toast('他のDBがありません。', 'err');
+
+        // 関連から自動で置かれているものは外せない（外しても線の行き先として戻る）。
+        // 手で足したものだけ外せる、という区別を一覧の見た目に出す。
+        const placed = new Set(data.nodes.filter(n => n.external).map(n => n.id));
+        const pinned = new Set(data.nodes.filter(n => n.pinned).map(n => n.id));
+        const back = el('div', { class: 'modal' });
+        const close = () => back.remove();
+        back.addEventListener('click', ev => { if (ev.target === back) close(); });
+
+        const body = el('div', { class: 'modal__body' });
+        const rows = [];
+        list.dbs.forEach(d => {
+            body.append(el('div', { class: 'small muted', style: 'padding:8px 10px 2px' },
+                d.title ? `${d.alias}（${d.title}）` : d.alias));
+            d.tables.forEach(t => {
+                const on = placed.has(t.id), fixed = on && !pinned.has(t.id);
+                const row = el('div', {
+                    class: 'fsrow' + (fixed ? ' is-fixed' : ''),
+                    'data-key': `${d.alias} ${t.table}`,
+                    title: fixed ? '関連が指しているので置かれています（外せません）' : '',
+                    onclick: fixed ? null : async () => {
+                        try {
+                            const r = await api('/api/catalog/er-external', {
+                                db: CAT.db, action: on ? 'remove' : 'add', table: t.id });
+                            applyEr(r.er); close();
+                            toast(on ? `${t.id} を外しました。` : `${t.id} を図に置きました。`);
+                        } catch (e) { toast(e.message, 'err'); }
+                    },
+                },
+                    el('span', { class: 'ico' }, icon(on ? 'check' : 'plus', 'icon--sm')),
+                    el('span', { class: 'name' }, t.table),
+                    fixed ? el('span', { class: 'small muted' }, '関連あり') : null,
+                    el('span', { class: 'small muted' },
+                        t.rows === null || t.rows === undefined ? '' : `${t.rows.toLocaleString()}行`));
+                rows.push(row);
+                body.append(row);
+            });
+        });
+
+        const filter = el('input', {
+            type: 'text', style: 'width:100%', placeholder: 'テーブル名で絞り込み',
+            oninput: ev => {
+                const q = ev.target.value.trim().toLowerCase();
+                rows.forEach(r => r.classList.toggle(
+                    'hidden', !!q && !r.dataset.key.toLowerCase().includes(q)));
+            },
+        });
+
+        back.append(el('div', { class: 'modal__box' },
+            el('div', { class: 'modal__head' },
+                el('b', { class: 'grow' }, '他DBのテーブルを図に置く'),
+                el('button', { class: 'btn btn--sm btn--ghost', onclick: close },
+                    icon('x', 'icon--sm'))),
+            el('div', { style: 'padding:10px 14px 0' }, filter,
+                el('div', { class: 'small muted mt' },
+                    '置いたテーブルへは、いつもどおり列からドラッグして関連を作れます。'
+                    + '関連が指しているテーブルは自動で置かれます。')),
+            body));
+        document.body.append(back);
+        filter.focus();
+        document.addEventListener('keydown', function esc(ev) {
+            if (ev.key !== 'Escape') return;
+            close(); document.removeEventListener('keydown', esc);
+        });
+    }
+
+    function wireViewport() {
+        viewport.addEventListener('pointerdown', ev => {
+            if (ev.target.closest('.ertable') || ev.target.closest('.er__panel')) return;
+            closePanel();
+            const sx = ev.clientX, sy = ev.clientY, ox = view.tx, oy = view.ty;
+            viewport.classList.add('is-panning');
+            const move = e2 => { view.tx = ox + (e2.clientX - sx); view.ty = oy + (e2.clientY - sy); applyView(); };
+            const up = () => {
+                viewport.classList.remove('is-panning');
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', up);
+            };
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', up);
+        });
+
+        viewport.addEventListener('wheel', ev => {
+            ev.preventDefault();
+            const r = viewport.getBoundingClientRect();
+            const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+            const k2 = Math.min(2.5, Math.max(0.2, view.k * (ev.deltaY < 0 ? 1.12 : 0.89)));
+            view.tx = mx - (mx - view.tx) * (k2 / view.k);
+            view.ty = my - (my - view.ty) * (k2 / view.k);
+            view.k = k2;
+            applyView();
+        }, { passive: false });
+    }
+
+    function fit() {
+        const nodes = shownNodes();
+        if (!nodes.length) return;
+        const boxes = nodes.map(n => {
+            const b = world.querySelector(`.ertable[data-id="${CSS.escape(n.id)}"]`);
+            return { x: n.x, y: n.y, w: b?.offsetWidth || 232, h: b?.offsetHeight || 120 };
+        });
+        const minX = Math.min(...boxes.map(b => b.x)), minY = Math.min(...boxes.map(b => b.y));
+        const maxX = Math.max(...boxes.map(b => b.x + b.w)), maxY = Math.max(...boxes.map(b => b.y + b.h));
+        const r = viewport.getBoundingClientRect();
+        view.k = Math.min(1.2, Math.max(0.2,
+            Math.min((r.width - 80) / (maxX - minX), (r.height - 80) / (maxY - minY))));
+        view.tx = 40 - minX * view.k;
+        view.ty = 40 - minY * view.k;
+        applyView();
+    }
+
+    async function saveLayout() {
+        const layout = Object.fromEntries(data.nodes.map(n => [n.id, [Math.round(n.x), Math.round(n.y)]]));
+        await api('/api/catalog/layout', { db: CAT.db, layout });
+        toast('配置を保存しました。');
+    }
+
+    function undo() {
+        const prev = undoStack.pop();
+        if (!prev) return;
+        $('#erUndo').disabled = !undoStack.length;
+        // 座標だけを戻す。関連そのものの取り消しはサーバ側の状態なので再取得で合わせる
+        prev.nodes.forEach(p => {
+            const n = data.nodes.find(x => x.id === p.id);
+            if (n) { n.x = p.x; n.y = p.y; }
+        });
+        render();
+    }
+
+    function init() {
+        root = $('#erRoot'); viewport = $('#erViewport');
+        world = $('#erWorld'); svg = $('#erSvg'); panel = $('#erPanel');
+        if (!root) return;
+        data = CAT.er;
+        svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%');
+        render();
+        wireViewport();
+        setTimeout(fit, 30);
+
+        $('#erSave').addEventListener('click', saveLayout);
+        $('#erUndo').addEventListener('click', undo);
+        $('#erFit').addEventListener('click', fit);
+        $('#erFull').addEventListener('click', () => {
+            root.classList.toggle('er--full');
+            $('#erFull').textContent = root.classList.contains('er--full') ? '全画面を終了' : '全画面';
+            setTimeout(fit, 60);
+        });
+        $('#erExt')?.addEventListener('click', openExternalPicker);
+        $('#erIncoming')?.addEventListener('click', () => {
+            showIncoming = !showIncoming;
+            render(); setTimeout(fit, 20);
+        });
+        $('#erUsage')?.addEventListener('click', () => {
+            showUsage = !showUsage;
+            syncUsageUi();
+            drawEdges();
+        });
+        document.addEventListener('keydown', ev => {
+            if (ev.key === 'Escape' && root.classList.contains('er--full')) $('#erFull').click();
+        });
+    }
+
+    function syncUsageUi() {
+        const btn = $('#erUsage');
+        if (btn) btn.classList.toggle('btn--primary', showUsage && usage !== null);
+        $('#erUsageLegend')?.classList.toggle('hidden', !(showUsage && usage !== null));
+    }
+
+    /** 利用状況を受け取って重ねる（カタログ画面が読み込み後に呼ぶ）。 */
+    function setUsage(map) {
+        usage = map || {};
+        const btn = $('#erUsage');
+        if (btn) btn.disabled = false;
+        syncUsageUi();
+        drawEdges();
+    }
+
+    return { init, refit: fit, mutate, setUsage };
+})();

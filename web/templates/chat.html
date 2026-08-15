@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}チャット — {{ app_title }}{% endblock %}
+{# チャットだけ画面固定（ログの中をスクロールさせる）。CSSの .is-chat 参照 #}
+{% block body_class %}is-chat{% endblock %}
+{# 見出しは置かない。何の画面かはサイドバーで分かるので、ログに縦を使う。 #}
+
+{% block sidebar %}
+<div class="sidebar__section">
+  <div class="sidebar__label">モデル</div>
+  <select id="modelPick" title="使うモデルを選ぶ"></select>
+  <div class="row mt" style="gap:8px;align-items:center">
+    <span id="modelBadge" class="badge" title="このモデルが画像を扱えるか"></span>
+    <div class="spacer"></div>
+  </div>
+</div>
+
+<div class="sidebar__section">
+  <div class="sidebar__label">対象データ</div>
+  {% if not db_files %}
+    <div class="small muted">data/ に .db がありません。<a href="{{ url_for('imp.index') }}">取り込み</a>から作成できます。</div>
+  {% endif %}
+  {# 名前にマウスを乗せると、カタログに書いた説明が出る（data-desc / common.js） #}
+  {% for f in db_files %}
+    <div class="dbpick" data-db="{{ f.name }}">
+      <div class="dbpick__head">
+        <input type="checkbox" class="dbpick__all"{{ 'checked' if f.name in selection }}>
+        <span class="dbpick__name"
+              data-desc-title="{{ f.name }}{% if f.title %}（{{ f.title }}）{% endif %}"
+              data-desc="{{ f.description }}{% if f.caveats %}{% for c in f.caveats %}
+※ {{ c }}{% endfor %}{% endif %}"
+              data-desc-meta="{{ f.tables|length }}テーブル">{{ f.name }}</span>
+        <span class="badge">{{ f.tables|length }}</span>
+      </div>
+      <div class="dbpick__tables">
+        {% for t in f.tables %}
+          <label><input type="checkbox" class="dbpick__t" value="{{ t.name }}"
+            {{ 'checked' if (f.name not in selection) or (t.name in selection[f.name]) }}>
+            <span data-desc-title="{{ t.name }}" data-desc="{{ t.description }}"
+                  data-desc-meta="{{ '{:,}行'.format(t.rows) if t.rows is not none else '行数不明' }} / {{ t.columns }}列">{{ t.name }}</span></label>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+  <div class="small muted mt" id="scopeSummary"></div>
+</div>
+
+<div class="sidebar__section">
+  <div class="row" style="align-items:center;margin-bottom:6px">
+    <div class="sidebar__label" style="margin:0;flex:1">チャット履歴</div>
+    <button class="btn btn--sm" id="newChat">＋ 新規</button>
+  </div>
+  <div id="historyList"></div>
+</div>
+{% endblock %}
+
+{% block body %}
+<div class="chat">
+  <div class="chat__log" id="log">
+    {# 中身は chat.js の renderEmpty() が描く。選んだDBによって出す例文が
+       変わるので、テンプレートとJSの両方に同じものを書かない。 #}
+    <div class="chat__inner" id="logInner"></div>
+  </div>
+
+  <div class="chat__composer">
+    {# 上を読んでいるあいだだけ出る「最新へ」。入力欄のすぐ上に浮かせる。 #}
+    <button class="jumpdown" id="jumpDown" type="button"
+            title="最新のメッセージへ" aria-label="最新のメッセージへ">
+      {{ icon('down') }}
+    </button>
+    <div class="composer__inner" id="attachRow" style="display:none">
+      <div id="attachList" class="attachlist"></div>
+    </div>
+    <div class="composer__inner">
+      <textarea id="input" rows="1" placeholder="{{ placeholder }}"></textarea>
+      <button class="btn btn--primary" id="send" style="height:44px;padding:0 18px">送信</button>
+    </div>
+  </div>
+
+  {# 画像をドラッグしてきたときだけ出る。添付はここへ落とすか、貼り付けで行う。 #}
+  <div class="dropzone" id="dropzone" aria-hidden="true">
+    <div class="dropzone__box">
+      {{ icon('image', 'icon--lg') }}
+      <span id="dropzoneText">画像をドロップして添付</span>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/vendor/plotly.min.js"></script>
+<script>
+window.CHAT_INIT = {
+  chatId: {{ (chat_id or '')|tojson }},
+  history: {{ history|tojson }},
+  autoDownload: {{ auto_download|default(true)|tojson }},
+  llmReady: {{ llm_ready|tojson }},
+  isAdmin: {{ user.is_admin|tojson }},
+  starters: {{ starters|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}

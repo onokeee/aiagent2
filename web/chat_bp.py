@@ -53,6 +53,7 @@ TOOL_LABELS = {
     "export_pptx": "PowerPoint作成",
     "describe_table": "テーブル詳細の確認",
     "show_er_diagram": "ER図の表示",
+    "open_table": "テーブル全体を開く",
     "hypothesis_test": "仮説検定",
     "regression": "回帰分析",
     "distribution_analysis": "分布の分析",

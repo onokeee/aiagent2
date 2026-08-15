@@ -1409,6 +1409,32 @@ BUILTIN_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "open_table",
+            "description": (
+                "テーブルの中身（全行）を見る画面を、利用者のブラウザの別タブで開く。"
+                "「〇〇テーブルを見せて」「中身を全部見たい」「データそのものを確認したい」"
+                "と言われたら、SELECT * を書くのではなくこれを使う。"
+                "画面では絞り込み・並べ替え・ページ送りができ、全行を辿れる。"
+                "開いたあとは、そのテーブルが何かを1〜2文で補足するだけでよい"
+                "（中身を表で貼り直さない）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table": {"type": "string", "description": "開くテーブル名。"},
+                    "db": {"type": "string",
+                           "description": "そのテーブルがあるDBファイル名（例: demo_sales.db）。"
+                                          "同じ表名が複数のDBにあるときは必須。"},
+                    "purpose": {"type": "string",
+                                "description": "何を確かめたくて開くかの短い説明。"},
+                },
+                "required": ["table"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "analyze_usage",
             "description": (
                 "このアプリ自身の使われ方（利用状況）を調べる。分析対象のDBの中身ではなく、"

@@ -620,11 +620,76 @@ def _export_text(args: dict, scope: list[dict]) -> dict:
         },
     }
 
+def _open_table(args: dict, scope: list[dict]) -> dict:
+    """テーブルの中身（全行）を別タブのビューアで開く。
+
+    「テーブルを見せて」に対して、AIが SELECT * を打って先頭数行を貼るのは
+    (1) 行数の上限で切れる (2) 会話が表で埋まる、の2つで具合が悪い。
+    全行を辿れる画面（/table）を開いて、AIは要約に専念する。
+    """
+    import db as dbmod
+
+    files = dbmod.list_db_files()
+    if not files:
+        return _err("data/ にDBがありません。")
+    name = str(args.get("db") or "").strip()
+    table = str(args.get("table") or "").strip()
+    if not table:
+        return _err("どのテーブルを開くかを table で指定してください。")
+
+    # DB名は 'sales.db' でも 'sales' でもよい。省略時は表名から探す
+    target = None
+    if name:
+        low = name.lower()
+        target = next((f for f in files
+                       if low in (f.name.lower(), f.stem.lower(), dbmod.alias_for(f).lower())), None)
+        if target is None:
+            return _err(f"DB '{name}' が見つかりません。指定できるのは: "
+                        + "、".join(f.name for f in files))
+    else:
+        hits = [f for f in files if table in (catalog.profile_db(f).get("tables") or {})]
+        if not hits:
+            return _err(f"テーブル '{table}' が見つかりません。db も指定してください。")
+        if len(hits) > 1:
+            return _err(f"テーブル '{table}' が複数のDBにあります（"
+                        + "、".join(f.name for f in hits) + "）。db で指定してください。")
+        target = hits[0]
+
+    profile = catalog.profile_db(target)
+    info = (profile.get("tables") or {}).get(table)
+    if info is None:
+        return _err(f"テーブル '{table}' が {target.name} にありません。"
+                    "このDBのテーブル: " + "、".join(list((profile.get("tables") or {}).keys())[:20]))
+
+    meta = catalog.load_meta(target)
+    tmeta = (meta.get("tables") or {}).get(table) or {}
+    cols = [c["name"] for c in (info.get("columns") or [])]
+    rows = info.get("row_count")
+    return {
+        "ok": True,
+        "llm_content": _json({
+            "status": "table_view_opened", "db": target.name, "table": table,
+            "rows": rows, "columns": cols,
+            "note": "テーブルの全行を見る画面を利用者の画面に出した（別タブで開く）。"
+                    "中身を SELECT * で貼り直す必要はない。"
+                    "何のテーブルか・何に使えるかを1〜2文で補足するだけでよい。",
+        }),
+        "render": {
+            "role": "assistant", "kind": "table_link",
+            "db": target.name, "table": table,
+            "title": f"{table}（{target.name}）",
+            "rows": rows, "columns": cols,
+            "description": tmeta.get("description") or "",
+        },
+    }
+
+
 # このモジュールが受け持つツール
 HANDLERS = {
     "run_sql_query": _run_sql_query,
     "describe_table": _describe_table,
     "show_er_diagram": _show_er_diagram,
+    "open_table": _open_table,
     "propose_glossary_term": _propose_glossary_term,
     "propose_example": _propose_example,
     "pivot_table": _pivot_table,

@@ -241,6 +241,36 @@ function catalogLinks(tables) {
 
 /* ER図のカード。図はその場に埋めず、開いたときにキャンバスを組み立てる。
    （er.js は一度に1つの図しか持てないので、開いている間だけ実体を作る） */
+/* 「テーブルを見せて」で出るカード。全行のビューアを別タブで開く。
+   出した直後は自動で開き、ブラウザに止められたときはボタンから開いてもらう
+   （履歴を開き直したときは勝手に開かない）。 */
+function tableCardLink(item, replaying) {
+    const href = `/table?db=${encodeURIComponent(item.db)}&table=${encodeURIComponent(item.table)}`;
+    const meta = [
+        item.rows === null || item.rows === undefined ? null : `${Number(item.rows).toLocaleString()}行`,
+        (item.columns || []).length ? `${item.columns.length}列` : null,
+        item.description || null,
+    ].filter(Boolean).join(' ・ ');
+    const card = el('div', { class: 'filecard' },
+        icon('table', 'icon--lg'),
+        el('div', { class: 'grow' },
+            el('div', { class: 'name' }, item.title || `${item.table}（${item.db}）`),
+            el('div', { class: 'small muted' }, meta || 'テーブルの中身を別タブで開きます')),
+        el('a', { class: 'btn btn--primary btn--sm', href, target: '_blank', rel: 'noopener' },
+           'テーブル全体を開く'));
+    if (!replaying) {
+        // 送信の流れの中なので、たいていのブラウザはこの window.open を通す。
+        // 止められたときだけ、カードのボタンから開いてもらう。
+        // 'noopener' を指定すると、成功しても戻り値が null になる仕様なので付けない
+        // （開けたかどうかを見分けられなくなる）。代わりに後から opener を切る。
+        const w = window.open(href, '_blank');
+        if (w) { try { w.opener = null; } catch (e) { /* 別オリジンではないので通常起きない */ } }
+        else toast('ブラウザが別タブを開けませんでした。カードの「テーブル全体を開く」から開いてください。',
+                   'warn', 8000);
+    }
+    return card;
+}
+
 function erCard(item) {
     return el('div', { class: 'filecard' },
         icon('table', 'icon--lg'),
@@ -441,6 +471,8 @@ function addItem(item) {
         body.append(glossaryCard(item));
     } else if (item.kind === 'example_proposal') {
         body.append(exampleCard(item));
+    } else if (item.kind === 'table_link') {
+        body.append(tableCardLink(item, replaying));
     } else if (item.kind === 'er') {
         body.append(erCard(item));
     } else if (item.kind === 'report') {

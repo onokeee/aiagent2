@@ -352,7 +352,8 @@ def _call_previews(calls: list[dict], scope: list[dict], question: str) -> list[
             args = json.loads(c["arguments"]) if c["arguments"] else {}
         except json.JSONDecodeError:
             args = {}
-        custom = next((t for t in custom_tools.collect(scope) if t.get("name") == c["name"]), None)
+        custom = next((t for t in custom_tools.collect_everywhere(scope)
+                       if t.get("name") == c["name"]), None)
         # 触れているテーブルを添える。画面ではカタログの該当テーブルへのリンクになり、
         # 「列の意味が分からない」と言われた場所から、そのまま説明を書きに行ける。
         if c["name"] in tools.SQL_TOOLS and "sql" in args:

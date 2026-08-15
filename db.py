@@ -109,6 +109,40 @@ def connect_scope(paths_aliases: list[tuple]) -> sqlite3.Connection:
     return conn
 
 
+def dbs_named_in(sql: str) -> list[str]:
+    """SQLが「エイリアス.」の形で名指ししているDBファイル名。"""
+    out = []
+    for p in list_db_files():
+        a = alias_for(p)
+        if a and re.search(r'(?<![\w."])' + re.escape(a) + r'\s*\.', sql, re.IGNORECASE):
+            out.append(p.name)
+    return out
+
+
+def widen_scope(sql: str, scope: list[dict]) -> list[dict]:
+    """SQLが必要とするDBを、選ばれていなくても繋ぐ。
+
+    ユーザー定義ツールは作った人がDBを意識せずに書くので、SQLが別DBに入ることがある。
+    選択中のDBだけを繋ぐと、正しいツールが "no such table" で落ちる。
+    読むだけであり、DBの選択はもともと「見る範囲を絞る」ためのもので
+    アクセス制御ではない（README参照）ため、必要なものは繋いでよい。
+
+    ATTACH の上限があるので、そこで打ち止める（超えた分は元のエラーで気づける）。
+    """
+    out = list(scope or [])
+    have = {str(s.get("alias") or "").lower() for s in out}
+    for p in list_db_files():
+        if len(out) >= MAX_ATTACHED:
+            break
+        a = alias_for(p)
+        if a.lower() in have:
+            continue
+        if re.search(r'(?<![\w."])' + re.escape(a) + r'\s*\.', sql, re.IGNORECASE):
+            out.append({"path": str(p), "alias": a, "name": p.name, "tables": None})
+            have.add(a.lower())
+    return out
+
+
 def narrow_scope(sql: str, scope: list[dict]) -> list[dict]:
     """そのSQLに関係するDBだけに絞る。
 

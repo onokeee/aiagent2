@@ -170,7 +170,7 @@ def scope_summary(scope: list[dict], user=None) -> dict:
     out = {
         "dbs": len(scope),
         "tables": sum(len(s["tables"]) for s in scope),
-        "custom_tools": len(custom_tools.collect(scope)) if scope else 0,
+        "custom_tools": len(custom_tools.collect_everywhere(scope)) if scope else 0,
         "aliases": [s["alias"] for s in scope],
     }
     if not scope:

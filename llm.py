@@ -564,6 +564,8 @@ def draft_tool(db_path, purpose: str, params_wanted: list[str] | None = None,
                error: str | None = None) -> dict:
     """日本語の「やりたいこと」から、ユーザー定義ツールの下書きを起こす。
 
+    db_path        … None なら全DBのカタログを見せる（作る人にDBを選ばせない）。
+                     特定のDBに限りたいときだけパスを渡す。
     purpose        … 何をするツールか（日本語）。毎回変えたい値もこの文から読み取らせる
                      ので、呼び出し側が指定を組み立てる必要はない。
     params_wanted  … 毎回変えたい項目を明示したいときだけ渡す（例: ["対象年", "部署"]）。
@@ -574,8 +576,14 @@ def draft_tool(db_path, purpose: str, params_wanted: list[str] | None = None,
     """
     import db                       # 循環importを避けるため、使うときに読む
 
-    path = Path(db_path)
-    context = catalog.db_text(db.alias_for(path), path, None, full=True)
+    # db_path が None なら全DBを見せる。どのDBに書くかは、やりたいことを読んだAIが
+    # 決める（作る人にDBを選ばせない）。量が上限を超えるときは要約に落ちる。
+    if db_path is None:
+        paths = db.list_db_files()
+    else:
+        paths = [Path(db_path)]
+    context = catalog.prompt_for_scope(
+        [{"path": str(p), "alias": db.alias_for(p), "tables": None} for p in paths])
     ask = [f"やりたいこと: {purpose}"]
     if params_wanted:
         ask.append("毎回変えたい項目: " + "、".join(params_wanted))

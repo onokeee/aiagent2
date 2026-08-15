@@ -90,6 +90,9 @@ def _run_custom(tool: dict, args: dict, scope: list[dict]) -> dict:
         params = custom_tools.coerce_params(tool, args)
     except ValueError as e:
         return _err(str(e))
+    # ツールは作るときにDBを意識させないので、SQLが選択外のDBに入ることがある。
+    # 必要なぶんは繋いでから実行する（結果を預ける先も同じ範囲にする）。
+    scope = db.widen_scope(sql, scope)
     try:
         columns, rows, truncated = db.run_select(sql, scope, params=params)
     except Exception as e:
@@ -191,7 +194,7 @@ def build_tools(entries: list[dict], admin: bool = False) -> list[dict]:
         if o.get("description"):
             t = {**t, "function": {**t["function"], "description": o["description"]}}
         out.append(t)
-    for tool in custom_tools.collect(entries):
+    for tool in custom_tools.collect_everywhere(entries):
         if not custom_tools.validate(tool, set()):     # 壊れた定義はAIに渡さない
             out.append(custom_tools.to_schema(tool))
     return out
@@ -338,7 +341,7 @@ def dispatch(name: str, arguments_json: str | None, scope: list[dict],
         except Exception as e:  # ツールの例外でアプリを落とさない
             return _err(f"ツール '{name}' の実行でエラー: {e}")
 
-    tool = next((t for t in custom_tools.collect(entries or []) if t.get("name") == name), None)
+    tool = next((t for t in custom_tools.collect_everywhere(entries or []) if t.get("name") == name), None)
     if tool is None:
         return {"ok": False, "llm_content": _json({"error": f"未知のツール: {name}"}), "render": None}
     try:

@@ -214,6 +214,40 @@ def collect(entries: list[dict]) -> list[dict]:
     return out
 
 
+def collect_everywhere(selected: list[dict] | None = None) -> list[dict]:
+    """全DBのユーザー定義ツールを集める。置き場のDBを選んでいなくても拾う。
+
+    ツールは作るときにDBを意識させない（SQLがどのDBに入るかはAIが決める）ので、
+    「置き場のDBを選んでいないと存在しないことになる」のは作った人の意図と食い違う。
+    組み込みツールと同じで、DBの選択に関係なく在ることにする。
+
+    selected を渡すと、そのSQLが名指ししているDBが1つも選ばれていないツールは外す。
+    いま見ている範囲と関係のないツールまで並べると、AIの選び分けが鈍るため。
+    """
+    import catalog                       # 循環importを避けるため、使うときに読む
+    import db as dbmod
+
+    picked = {str(s.get("name") or "") for s in (selected or [])}
+    out, seen = [], set()
+    for p in dbmod.list_db_files():
+        alias = dbmod.alias_for(p)
+        for t in (catalog.load_meta(p).get("tools") or []):
+            if not isinstance(t, dict):
+                continue
+            name = str(t.get("name") or "").strip()
+            if not name or name in seen or t.get("enabled") is False:
+                continue
+            if picked:
+                needs = set(dbmod.dbs_named_in(str(t.get("sql") or "")))
+                # どのDBも名指ししていないSQLは、置き場のDBのものとして扱う
+                if not (needs or {p.name}) & picked:
+                    continue
+            seen.add(name)
+            # owner_file は編集画面が保存先を知るためのもの（aliasはファイル名と別物）
+            out.append({**t, "owner": alias, "owner_file": p.name})
+    return out
+
+
 def builtin_overrides(entries: list[dict]) -> dict:
     """組み込みツールの有効/無効・説明上書きを合成する。
 

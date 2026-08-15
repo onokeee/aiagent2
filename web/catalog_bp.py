@@ -17,7 +17,7 @@ import sqlusage
 import tools
 import verify
 
-from .helpers import admin_required, jsonable
+from .helpers import admin_required, dbs_in_sql, jsonable
 
 bp = Blueprint("catalog", __name__)
 
@@ -167,8 +167,8 @@ def index():
         suggestions=(catalog.join_suggestions(profile, meta)
                      + sqlusage.suggestions_for(db.alias_for(target), profile, meta)),
         er=_er_payload(target, profile, meta),
-        custom=custom_tools.collect([{"path": str(target), "alias": db.alias_for(target),
-                                      "meta": meta, "tables": None}]),
+        # ツールはDBに紐づけずに作るので、一覧も全DB分を出す（組み込みと同じ扱い）
+        custom=custom_tools.collect_everywhere(),
         builtin=[_builtin_view(t) for t in tools.BUILTIN_TOOLS],
         chart_fields={t: list(charts.required_fields(t)) for t in charts.CHART_TYPES},
         builtin_overrides=meta.get("builtin_tools") or {},
@@ -740,6 +740,25 @@ def verify_examples():
     return jsonify({"results": out})
 
 
+def _home_db(sql: str, preferred: Path | None = None) -> str:
+    """このツール定義を置くDBファイルを決める。
+
+    ツールはDBを選ばずに作るが、定義の置き場（どの .meta.yaml か）は
+    1つに決めないといけない。SQLが最初に名指ししているDB＝主に見ているDBに置く。
+    そのDBを消せばツールも一緒に片づく（cleanup.py の巻き添え掃除に乗る）。
+    """
+    if preferred is not None:
+        return Path(preferred).name
+    allscope = [{"path": str(p), "alias": db.alias_for(p), "name": p.name,
+                 "tables": list((catalog.profile_db(p).get("tables") or {}).keys())}
+                for p in db.list_db_files()]
+    hits = dbs_in_sql(sql, allscope)
+    if hits:
+        return hits[0]["name"]
+    files = db.list_db_files()
+    return files[0].name if files else ""
+
+
 def _sample_params(tool: dict, given: dict | None = None) -> dict:
     """試し実行に使う値。画面で入れた値 → AIが添えた例 → 型ごとの既定値、の順に採る。
 
@@ -810,7 +829,9 @@ def draft_tool():
     もう一度だけ書き直させる。通らないSQLをそのまま画面に出さないため。
     """
     body = request.json or {}
-    path = db.path_for(body["db"])
+    # DBは指定させない。どのDBを使うかは、やりたいことを読んだAIが決める。
+    # 特定のDBに限りたいときだけ db を渡せる。
+    path = db.path_for(body["db"]) if body.get("db") else None
     purpose = str(body.get("purpose") or "").strip()
     if not purpose:
         return jsonify({"error": "何をするツールかを書いてください。"}), 400
@@ -821,7 +842,7 @@ def draft_tool():
     render = body.get("render") or "table"
     # AIが付けた名前が不正・重複でも、保存で突き返されるのはユーザーには
     # 意味不明（名前を入力していないので）。ここで必ず有効な名前に直す。
-    taken = [t.get("name") for t in (catalog.load_meta(path).get("tools") or [])]
+    taken = [t.get("name") for t in custom_tools.collect_everywhere()]
     tried = []
     draft, last_err = None, None
     for attempt in range(2):          # 1回目でだめならエラーを見せて書き直させる
@@ -838,14 +859,16 @@ def draft_tool():
             continue
         try:
             params = custom_tools.coerce_params(draft, _sample_params(draft))
-            columns, rows, _ = db.run_select(sql, _sql_scope(sql, path),
-                                             max_rows=8, params=params)
+            scope = (_sql_scope(sql, path) if path
+                     else db.widen_scope(sql, []))
+            columns, rows, _ = db.run_select(sql, scope, max_rows=8, params=params)
         except Exception as e:
             last_err = str(e).splitlines()[0][:200]
             tried.append(last_err)
             continue
         return jsonify({"ok": True, "tool": draft, "columns": columns,
                         "rows": [[jsonable(v) for v in r] for r in rows],
+                        "home_db": _home_db(sql, path),
                         "attempts": attempt + 1, "tried": tried})
 
     # 2回とも通らなかった。下書きは返す（人が直せるように）

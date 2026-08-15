@@ -1313,6 +1313,8 @@ function toolCard(tool) {
     const t = tool || { name: '', description: '', sql: '', parameters: [],
                         render: 'table', chart: {}, enabled: true };
     const original = t.name;
+    // 定義が置かれているDB。一覧は全DBぶん出すので、開いているDBとは限らない
+    const ownerFile = t.owner_file || CAT.db;
 
     const params = el('div', {}, (t.parameters || []).map(paramRow));
     const chartBox = el('div', { class: 'mt' });
@@ -1323,6 +1325,8 @@ function toolCard(tool) {
     const card = el('details', { class: 'acc', ...(tool ? {} : { open: 'open' }) },
         el('summary', {},
             el('strong', {}, t.name || '（新しいツール）'),
+            t.owner_file ? el('span', { class: 'small muted', style: 'margin-left:8px' },
+                              '保存先: ' + t.owner_file) : null,
             t.enabled === false ? el('span', { class: 'badge badge--warn' }, '無効') : null),
         el('div', { class: 'acc__body' },
             el('div', { class: 'row mb' },
@@ -1353,13 +1357,13 @@ function toolCard(tool) {
                 el('button', {
                     class: 'btn btn--sm',
                     title: '実際のデータで動かして、結果を確かめます',
-                    onclick: ev => tryTool(readTool(card, original), ev.target),
+                    onclick: ev => tryTool(readTool(card, original), ev.target, null, ownerFile),
                 }, '試す'),
                 tool ? el('button', {
                     class: 'btn btn--sm btn--danger',
                     onclick: async () => {
                         if (!confirm(`${t.name} を削除しますか？`)) return;
-                        await api('/api/catalog/tool', { db: CAT.db, action: 'delete', name: t.name });
+                        await api('/api/catalog/tool', { db: ownerFile, action: 'delete', name: t.name });
                         toast('削除しました。'); reloadClean();
                     },
                 }, '削除') : null,
@@ -1369,7 +1373,7 @@ function toolCard(tool) {
                         const payload = readTool(card, original);
                         try {
                             await api('/api/catalog/tool',
-                                { db: CAT.db, tool: payload, name: payload.name, original });
+                                { db: ownerFile, tool: payload, name: payload.name, original });
                             toast('保存しました。'); reloadClean();
                         } catch (e) { toast(e.message, 'err'); }
                     },
@@ -1425,7 +1429,7 @@ function resultTable(res) {
     return box;
 }
 
-async function tryTool(payload, btn, into) {
+async function tryTool(payload, btn, into, dbFile) {
     const target = into || (() => {
         // 押したボタンの近くに結果を出す。無ければ作る
         const card = btn.closest('.acc__body') || btn.parentElement;
@@ -1436,7 +1440,7 @@ async function tryTool(payload, btn, into) {
     target.replaceChildren(el('div', { class: 'small muted' }, '試しています…'));
     if (btn) btn.disabled = true;
     try {
-        const res = await api('/api/catalog/tool/try', { db: CAT.db, tool: payload });
+        const res = await api('/api/catalog/tool/try', { db: dbFile || CAT.db, tool: payload });
         target.replaceChildren(resultTable(res));
         return res;
     } catch (e) {
@@ -1461,12 +1465,14 @@ function openToolWizard(seed) {
 
     const out = el('div', { class: 'mt' });
     let drafted = null;
+    // 保存先の .meta.yaml。SQLが主に見ているDBをサーバが決める（作る人は選ばない）
+    let homeDb = CAT.db;
 
     const saveBtn = el('button', { class: 'btn btn--primary btn--sm', disabled: 'disabled',
         onclick: async () => {
             try {
                 await api('/api/catalog/tool',
-                    { db: CAT.db, tool: drafted, name: drafted.name, original: '' });
+                    { db: homeDb, tool: drafted, name: drafted.name, original: '' });
                 close(); toast('ツールを作りました。'); reloadClean();
             } catch (e) { toast(e.message, 'err', 9000); }
         } }, 'この内容で作る');
@@ -1478,9 +1484,11 @@ function openToolWizard(seed) {
         out.replaceChildren(el('div', { class: 'small muted' },
             'AIがSQLを起こして、実際のデータで確かめています…'));
         try {
+            // db は送らない。全DBのカタログを見て、AIがどのDBを使うか決める
             const res = await api('/api/catalog/tool/draft', {
-                db: CAT.db, purpose: text, render: 'table' });
+                purpose: text, render: 'table' });
             drafted = res.tool;
+            if (res.home_db) homeDb = res.home_db;
             out.replaceChildren();
             if (!res.ok) {
                 out.append(el('div', { class: 'alert alert--err small' },
@@ -1525,7 +1533,9 @@ function openToolWizard(seed) {
                             `${p.description || p.name}=「${p.example ?? ''}」`).join('、')
                         + ' で試した結果です。AIが呼ぶときは質問に合わせて値を入れます。'))
                 : el('div', { class: 'small muted mt' },
-                    '毎回変える値はありません（いつも同じ条件で返します）。'));
+                    '毎回変える値はありません（いつも同じ条件で返します）。'),
+            el('div', { class: 'small muted mt' },
+                `定義の保存先: ${homeDb}（SQLが主に見ているDB。使うときに意識する必要はありません）`));
     }
 
     /* 起こした中身をその場で直せるようにする。ふつうは開かなくてよい。 */
@@ -1542,7 +1552,7 @@ function openToolWizard(seed) {
                 el('label', { class: 'field mt' }, 'SQL'), sql,
                 el('div', { class: 'row mt' },
                     el('button', { class: 'btn btn--sm', onclick: async ev => {
-                        const res = await tryTool(drafted, ev.target, retryBox);
+                        const res = await tryTool(drafted, ev.target, retryBox, homeDb);
                         saveBtn.disabled = !res.ok;
                     } }, 'この内容で試す')),
                 retryBox));

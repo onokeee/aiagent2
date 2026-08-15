@@ -247,8 +247,79 @@ const ER = (() => {
     /* --- 選択パネル ------------------------------------------------------------ */
 
     function closePanel() {
-        selected = null; panel.classList.add('hidden'); panel.classList.remove('er__panel--wide');
+        selected = null; panel.classList.add('hidden');
+        panel.classList.remove('er__panel--wide', 'er__panel--max');
         drawEdges(); syncSelection();
+    }
+
+    /* パネルの見出し（タイトル・最大化・閉じる）。3種類のパネルで同じ形にする。 */
+    function panelHead(title, extra) {
+        const maxBtn = el('button', { class: 'btn btn--sm btn--ghost', title: '最大化' });
+        const syncMax = () => {
+            const on = panel.classList.contains('er__panel--max');
+            maxBtn.replaceChildren(icon(on ? 'minimize' : 'maximize', 'icon--sm'));
+            maxBtn.title = on ? '元の大きさに戻す' : '最大化';
+        };
+        maxBtn.addEventListener('click', () => {
+            panel.classList.toggle('er__panel--max');
+            syncMax();
+        });
+        syncMax();
+        return el('div', { class: 'row', style: 'align-items:center;flex:0 0 auto' },
+            el('b', { class: 'grow' }, title),
+            extra || null,
+            maxBtn,
+            el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
+                           onclick: closePanel }, icon('x', 'icon--sm')));
+    }
+
+    /* パネルを出す。中身は本文コンテナに入れ、境目に取っ手を付ける。
+       ドラッグで決めた大きさ（width/height）は次に開くときも保つ。 */
+    function showPanel(title, bodyChildren, opts) {
+        panel.classList.remove('hidden');
+        panel.classList.toggle('er__panel--wide', !!(opts && opts.wide));
+        panel.classList.remove('er__panel--max');
+        const body = el('div', { class: 'er__panel__body' }, ...(bodyChildren || []));
+        panel.replaceChildren(
+            el('div', { class: 'er__grip er__grip--l' }),
+            el('div', { class: 'er__grip er__grip--t' }),
+            el('div', { class: 'er__grip er__grip--tl' }),
+            panelHead(title, opts && opts.extra),
+            body);
+        wirePanelResize();
+        return body;
+    }
+
+    /* 左辺・上辺・左上の角をつまんで大きさを変える。パネルは右下に付いているので、
+       左へ引けば広く、上へ引けば高くなる。 */
+    function wirePanelResize() {
+        panel.querySelectorAll('.er__grip').forEach(g => {
+            g.addEventListener('pointerdown', ev => {
+                ev.preventDefault(); ev.stopPropagation();
+                const dirL = g.classList.contains('er__grip--l') || g.classList.contains('er__grip--tl');
+                const dirT = g.classList.contains('er__grip--t') || g.classList.contains('er__grip--tl');
+                const r = panel.getBoundingClientRect();
+                const sx = ev.clientX, sy = ev.clientY, w0 = r.width, h0 = r.height;
+                const vp = viewport.getBoundingClientRect();
+                const move = e2 => {
+                    if (dirL) {
+                        const w = Math.max(280, Math.min(vp.width - 20, w0 + (sx - e2.clientX)));
+                        panel.style.width = `${w}px`;
+                    }
+                    if (dirT) {
+                        const h = Math.max(160, Math.min(vp.height - 20, h0 + (sy - e2.clientY)));
+                        panel.style.height = `${h}px`;
+                        panel.style.maxHeight = 'none';
+                    }
+                };
+                const up = () => {
+                    document.removeEventListener('pointermove', move);
+                    document.removeEventListener('pointerup', up);
+                };
+                document.addEventListener('pointermove', move);
+                document.addEventListener('pointerup', up);
+            });
+        });
     }
 
     function syncSelection() {
@@ -259,12 +330,7 @@ const ER = (() => {
     function selectEdge(e) {
         selected = { type: 'edge', id: e.id, edge: e };
         drawEdges(); syncSelection();
-        panel.classList.remove('hidden');
-        panel.replaceChildren(
-            el('div', { class: 'row', style: 'align-items:center' },
-                el('b', { class: 'grow' }, '関連'),
-                el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
-                               onclick: closePanel }, icon('x', 'icon--sm'))),
+        showPanel('関連', [
             el('div', { class: 'small mono mb' },
                 `${e.from.join('.')}\n${e.to.join('.')}`),
             e.kind === 'fk'
@@ -284,7 +350,7 @@ const ER = (() => {
                     el('button', {
                         class: 'btn btn--sm btn--danger',
                         onclick: () => { if (confirm('この関連を削除しますか？')) mutate({ action: 'delete', index: e.index }); },
-                    }, '削除')));
+                    }, '削除'))]);
     }
 
     function selectTable(id) {
@@ -292,15 +358,10 @@ const ER = (() => {
         if (!n) return;
         selected = { type: 'table', id };
         drawEdges(); syncSelection();
-        panel.classList.remove('hidden');
-
         // 借りたテーブルは中身をいじらせない。主キーや説明は持ち主のDBで直す
         if (n.external) {
-            panel.replaceChildren(
-                el('div', { class: 'row', style: 'align-items:center' },
-                    el('b', { class: 'grow' }, `${n.alias}.${n.table}`),
-                    el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
-                                   onclick: closePanel }, icon('x', 'icon--sm'))),
+            const extBody = el('div', { class: 'small muted mt' }, el('span', { class: 'spinner' }), ' 読み込み中...');
+            showPanel(`${n.alias}.${n.table}`, [
                 el('div', { class: 'alert alert--info small' },
                     `${n.alias} のテーブルです。線をつなぐために置いています。`
                     + '主キーや説明は、そのDBのカタログで編集してください。'),
@@ -320,11 +381,10 @@ const ER = (() => {
                 : el('div', { class: 'small muted', style: 'margin-top:8px' },
                     n.incoming
                         ? `${n.alias} 側の関連がこのDBを指しているので置いています。`
-                        : 'このDBの関連が指しているので置いています。関連を消すと消えます。'));
-            // 借りたテーブルでも中身は見られる（説明・列・サンプル行）
-            const extBody = el('div', { class: 'small muted mt' }, el('span', { class: 'spinner' }), ' 読み込み中...');
-            panel.append(extBody);
-            panel.classList.add('er__panel--wide');
+                        : 'このDBの関連が指しているので置いています。関連を消すと消えます。'),
+                // 借りたテーブルでも中身は見られる（説明・列・サンプル行）
+                extBody,
+            ], { wide: true });
             api(`/api/catalog/table-info?db=${encodeURIComponent(n.alias)}&table=${encodeURIComponent(n.table)}`,
                 undefined, 'GET').then(info => {
                 if (selected?.id !== id) return;
@@ -335,15 +395,11 @@ const ER = (() => {
 
         // 概要・列の説明・実値・サンプル行を取りに行く（描画用の図には入れていない）。
         // 主キーの編集はカタログ画面だけ（読み取り専用のチャットでは出さない）。
-        const head = el('div', { class: 'row', style: 'align-items:center' },
-            el('b', { class: 'grow' }, `${n.table}`),
-            n.rows !== null && n.rows !== undefined
-                ? el('span', { class: 'muted small' }, `${Number(n.rows).toLocaleString()}行`) : null,
-            el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
-                           onclick: closePanel }, icon('x', 'icon--sm')));
+        const rowsBadge = (n.rows !== null && n.rows !== undefined)
+            ? el('span', { class: 'muted small', style: 'margin-right:6px' },
+                 `${Number(n.rows).toLocaleString()}行`) : null;
         const body = el('div', { class: 'small muted' }, el('span', { class: 'spinner' }), ' 読み込み中...');
-        panel.replaceChildren(head, body);
-        panel.classList.add('er__panel--wide');
+        showPanel(`${n.table}`, [body], { wide: true, extra: rowsBadge });
 
         api(`/api/catalog/table-info?db=${encodeURIComponent(n.alias)}&table=${encodeURIComponent(n.table)}`,
             undefined, 'GET').then(info => {

@@ -4,7 +4,8 @@ Streamlit 版との違いは状態の置き場所だけで、流れは同じ。
   質問 → LLM → tool_calls があれば実行 → 結果を返して再度LLM → 最終回答
 
 会話の実体は chats.py（ユーザーごとのファイル）に置く。
-対象データとモデルの選択は prefs.py に置く（ログアウトしても残す）。
+使うモデルの選択は prefs.py に置く（ログアウトしても残す）。
+対象データはユーザーが選ばず、質問ごとに _auto_scope が決める。
 セッションに持つのは「いまどの会話を開いているか」だけ。
 """
 from __future__ import annotations
@@ -23,7 +24,6 @@ import db
 import llm
 import mailer
 import models
-import prefs
 import tools
 import verify
 

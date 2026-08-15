@@ -156,8 +156,7 @@ async function openChat(id) {
 
 /* --- 描画 ------------------------------------------------------------------- */
 
-/* まだ何も話していないときの画面。
-   例文は選んだDBのカタログから来るので、選択が変わるたびに描き直す。 */
+/* まだ何も話していないときの画面。例文は全DBのカタログ（examples）から来る。 */
 let starters = { examples: [], tables: [] };
 
 function renderEmpty() {
@@ -170,12 +169,11 @@ function renderEmpty() {
         return box;
     }
 
-    const picked = (starters.tables || []).length;
-    if (!picked) {
-        // DBを選ばずに例文を押すとエラーになるので、選ぶまで例文は出さない
-        box.append(el('div', {}, '左のサイドバーから、対象のデータを選んでください。'),
+    if (!(starters.tables || []).length) {
+        // data/ にDBが1つも無い
+        box.append(el('div', {}, '分析できるデータがまだありません。'),
             el('div', { class: 'small muted mt' },
-                'DBの名前をクリックすると、中のテーブルを絞り込めます。'));
+                '管理者は「データ取り込み」からExcel/CSVでDBを作成できます。'));
         return box;
     }
 

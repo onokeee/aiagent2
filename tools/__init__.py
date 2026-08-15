@@ -33,7 +33,7 @@ dispatch(name, arguments_json, scope, entries, admin) の戻り値:
     "render": dict | None,     # UI描画用アイテム(app側が kind を見て解釈)
   }
 
-scope はチャット側で選択された対象DB群:
+scope は質問ごとに自動判定された対象DB群（web/chat_bp.py の _auto_scope）:
   [{"path": str, "alias": str, "tables": [...]}, ...]
 
 ファイルの分かれ方:

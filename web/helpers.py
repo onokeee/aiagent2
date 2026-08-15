@@ -11,7 +11,6 @@ from flask import g, jsonify, redirect, render_template, request, session, url_f
 import auth
 import catalog
 import config
-import custom_tools
 import db
 
 _USER_KEY = "user"
@@ -162,34 +161,6 @@ def tables_in_sql(sql: str, scope: list[dict], limit: int = 6) -> list[dict]:
                 seen.add(key)
                 out.append({"db": s.get("name"), "table": name})
     return out[:limit]
-
-
-def scope_summary(scope: list[dict], user=None) -> dict:
-    # 選びすぎるとカタログが要約版に落ち、列名がAIに渡らなくなる。
-    # 「AIが列を知らない状態」は画面からは見えないので、ここで知らせる。
-    out = {
-        "dbs": len(scope),
-        "tables": sum(len(s["tables"]) for s in scope),
-        "custom_tools": len(custom_tools.collect_everywhere(scope)) if scope else 0,
-        "aliases": [s["alias"] for s in scope],
-    }
-    if not scope:
-        return {**out, "columns_inlined": True}
-    try:
-        import llm
-        import models
-        b = llm.budget(scope, model=models.current(user or g.get("user")),
-                       admin=bool(getattr(g.get("user"), "is_admin", False)))
-    except Exception:
-        full = catalog.inline_length(scope)
-        return {**out, "columns_inlined": full <= catalog.inline_limit()}
-    # 列名まで渡せているか（False なら AI は describe_table で都度調べることになる）
-    out["columns_inlined"] = b["catalog_inlined"]
-    out["budget"] = {k: b[k] for k in
-                     ("model", "context", "context_known", "limit_chars",
-                      "catalog_chars", "now_tokens", "now_pct", "headroom_pct")}
-    return out
-
 
 #: 最初の画面に出す例文の上限。多すぎると選べない。
 _EXAMPLE_LIMIT = 6

@@ -4,7 +4,8 @@
 Pythonコードは書かせない。SQLは既存の SELECT専用ガード（db.run_select）を通し、
 パラメータは SQLite のバインド変数として渡すのでSQLインジェクションは起こらない。
 
-保存先は各DBの .meta.yaml の `tools:`（そのDBを選択したときだけAIに渡る）。
+保存先は各DBの .meta.yaml の `tools:`。どのDBに置かれていても全DB共通で使える
+（collect_everywhere が全DBから集める。置き場はSQLが主に見ているDBに自動で決まる）。
 
   tools:
     - name: monthly_sales
@@ -191,26 +192,6 @@ def coerce_params(tool: dict, args: dict) -> dict:
                 out[pn] = str(v)
         except (TypeError, ValueError):
             raise ValueError(f"パラメータ '{pn}' を {t} として解釈できません: {v!r}")
-    return out
-
-
-def collect(entries: list[dict]) -> list[dict]:
-    """選択スコープのDB群から、有効なユーザー定義ツールを集める。
-
-    entries: [{"alias", "meta", ...}, ...]
-    戻り値の各要素は tool 定義に "owner"（DBエイリアス）を足したもの。
-    同名が複数DBにあった場合は最初のものだけを採用する。
-    """
-    out, seen = [], set()
-    for e in entries:
-        for t in (e.get("meta", {}).get("tools") or []):
-            if not isinstance(t, dict):
-                continue
-            name = str(t.get("name") or "").strip()
-            if not name or name in seen or t.get("enabled") is False:
-                continue
-            seen.add(name)
-            out.append({**t, "owner": e["alias"]})
     return out
 
 

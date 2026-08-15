@@ -83,6 +83,9 @@ def set_selection(user, selection: dict) -> dict:
     return sel
 
 
+# 対象データの選択（selection）は選択UIの廃止で書き込まれなくなったが、
+# 既存ユーザーのファイルに残った選択を cleanup.py が掃除するため、読み書きは残す。
+
 # --- モデルの選択 ----------------------------------------------------------------
 
 def get_model(user) -> str:

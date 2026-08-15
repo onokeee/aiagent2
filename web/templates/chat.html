@@ -58,8 +58,8 @@
 {% block body %}
 <div class="chat">
   <div class="chat__log" id="log">
-    {# 中身は chat.js の renderEmpty() が描く。選んだDBによって出す例文が
-       変わるので、テンプレートとJSの両方に同じものを書かない。 #}
+    {# 中身は chat.js の renderEmpty() が描く。例文はカタログ由来で変わるので、
+       テンプレートとJSの両方に同じものを書かない。 #}
     <div class="chat__inner" id="logInner"></div>
   </div>
 

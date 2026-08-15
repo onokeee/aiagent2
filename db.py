@@ -100,8 +100,7 @@ def connect_scope(paths_aliases: list[tuple]) -> sqlite3.Connection:
             f"1つのSQLで扱えるDBは{MAX_ATTACHED}個までです"
             f"（この問い合わせは{len(paths_aliases)}個を必要としています）。SQLiteの制限です。"
             "テーブル名を『DB名.テーブル名』の形で書けば、実際に使うDBだけを繋ぐので"
-            "多くの場合はこの制限に当たりません。"
-            "どうしても必要なら、サイドバーで対象のDBを絞ってください。")
+            "多くの場合はこの制限に当たりません。")
     conn = sqlite3.connect("file::memory:", uri=True)
     for path, alias in paths_aliases:
         # alias は英数字と_のみに正規化済みなので識別子として安全
@@ -302,7 +301,7 @@ def run_select(sql: str, scope: list[dict], max_rows: int | None = None,
     戻り値: (columns, rows, truncated)
     """
     if not scope:
-        raise ValueError("対象のDBが選択されていません。サイドバーでDBを選択してください。")
+        raise ValueError("対象のDBがありません。data/ にDBを置いてください。")
     safe_sql = validate_select(sql)
     max_rows = max_rows or config.MAX_RESULT_ROWS
     timeout_s = timeout_s or config.QUERY_TIMEOUT_SEC

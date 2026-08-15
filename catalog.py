@@ -738,7 +738,7 @@ def er_payload(path, profile: dict | None = None,
 
 
 # =============================================================================
-# ER図（DOT生成 → st.graphviz_chart で描画。静的な俯瞰ビュー用）
+# 関連の向きと多重度（ER図とデータ検査が共有する規則）
 # =============================================================================
 
 # IPA表記の多重度ラベル: 線の両端に "1" と "*" を置く
@@ -1023,7 +1023,7 @@ def prompt_for_scope(scope: list[dict], limit: int | None = None) -> str:
     （models.inline_limit_for 参照。固定値だと小さいモデルで溢れるため）。
     """
     if not scope:
-        return "（現在、対象のDBが選択されていません。サイドバーでDBとテーブルを選ぶよう案内してください。）"
+        return "（対象にできるDBがありません。「データ取り込み」でDBを作るよう案内してください。）"
     full = "\n".join(db_text_cached(s["alias"], s["path"], s.get("tables"), full=True)
                      for s in scope)
     if len(full) <= (limit if limit is not None else inline_limit()):

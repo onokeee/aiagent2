@@ -193,14 +193,14 @@ def build_system_prompt(scope: list[dict], admin: bool = False,
         inline_cap = models_mod.inline_limit_for(model)
     aliases = [s["alias"] for s in scope]
     if len(aliases) > 1:
-        naming = (f"複数のDBが選択されています（{', '.join(aliases)}）。"
+        naming = (f"複数のDBが対象です（{', '.join(aliases)}）。"
                   "テーブル名は必ず『エイリアス.テーブル名』で修飾すること"
                   f"（例: {aliases[0]}.xxx）。DBをまたぐ JOIN も可能。")
     elif aliases:
-        naming = (f"選択中のDBは {aliases[0]} の1つ。テーブル名はそのまま書いてよい"
+        naming = (f"対象のDBは {aliases[0]} の1つ。テーブル名はそのまま書いてよい"
                   f"（{aliases[0]}.テーブル名 と修飾しても可）。")
     else:
-        naming = "現在DBが選択されていません。サイドバーでDBとテーブルを選ぶようユーザーに案内すること。"
+        naming = "対象にできるDBがありません。「データ取り込み」でDBを作るよう案内すること。"
 
     # 実際に渡すツール一覧（無効化・説明の上書き・ユーザー定義ツールを反映）
     lines = []

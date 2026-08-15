@@ -246,7 +246,10 @@ const ER = (() => {
 
     /* --- 選択パネル ------------------------------------------------------------ */
 
-    function closePanel() { selected = null; panel.classList.add('hidden'); drawEdges(); syncSelection(); }
+    function closePanel() {
+        selected = null; panel.classList.add('hidden'); panel.classList.remove('er__panel--wide');
+        drawEdges(); syncSelection();
+    }
 
     function syncSelection() {
         world.querySelectorAll('.ertable').forEach(b =>
@@ -303,7 +306,7 @@ const ER = (() => {
                     + '主キーや説明は、そのDBのカタログで編集してください。'),
                 // 関連が指しているから置かれているものは、外しても線の行き先が
                 // 無くなるだけなので外させない。手で足したものだけ外せる
-                n.pinned ? el('button', {
+                (!ro && n.pinned) ? el('button', {
                     class: 'btn btn--sm', style: 'margin-top:8px',
                     onclick: async () => {
                         try {
@@ -318,31 +321,96 @@ const ER = (() => {
                     n.incoming
                         ? `${n.alias} 側の関連がこのDBを指しているので置いています。`
                         : 'このDBの関連が指しているので置いています。関連を消すと消えます。'));
+            // 借りたテーブルでも中身は見られる（説明・列・サンプル行）
+            const extBody = el('div', { class: 'small muted mt' }, el('span', { class: 'spinner' }), ' 読み込み中...');
+            panel.append(extBody);
+            panel.classList.add('er__panel--wide');
+            api(`/api/catalog/table-info?db=${encodeURIComponent(n.alias)}&table=${encodeURIComponent(n.table)}`,
+                undefined, 'GET').then(info => {
+                if (selected?.id !== id) return;
+                extBody.replaceChildren(...describeParts(info, n));
+            }).catch(e => extBody.replaceChildren(el('div', { class: 'alert alert--err small' }, e.message)));
             return;
         }
 
-        const checks = n.columns.map(c => el('label',
-            { style: 'display:flex;gap:6px;align-items:center;font-size:12px' },
-            el('input', { type: 'checkbox', 'data-pk': c.name, ...(c.pk ? { checked: 'checked' } : {}) }),
-            c.name));
-        panel.replaceChildren(
-            el('div', { class: 'row', style: 'align-items:center' },
-                el('b', { class: 'grow' }, `${n.table}`),
-                el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
-                               onclick: closePanel }, icon('x', 'icon--sm'))),
-            el('div', { class: 'small muted mb' }, '主キーにする列（鍵＝実線の下線）'),
-            el('div', { style: 'max-height:190px;overflow:auto;margin-bottom:10px' }, checks),
-            el('button', {
-                class: 'btn btn--primary btn--sm',
-                onclick: async () => {
-                    const cols = [...panel.querySelectorAll('[data-pk]')]
-                        .filter(c => c.checked).map(c => c.dataset.pk);
-                    pushUndo();
-                    const r = await api('/api/catalog/primary-key',
-                        { db: CAT.db, table: n.table, columns: cols });
-                    data = r.er; render(); closePanel(); toast('主キーを保存しました。');
-                },
-            }, '保存'));
+        // 概要・列の説明・実値・サンプル行を取りに行く（描画用の図には入れていない）。
+        // 主キーの編集はカタログ画面だけ（読み取り専用のチャットでは出さない）。
+        const head = el('div', { class: 'row', style: 'align-items:center' },
+            el('b', { class: 'grow' }, `${n.table}`),
+            n.rows !== null && n.rows !== undefined
+                ? el('span', { class: 'muted small' }, `${Number(n.rows).toLocaleString()}行`) : null,
+            el('button', { class: 'btn btn--sm btn--ghost', title: '閉じる',
+                           onclick: closePanel }, icon('x', 'icon--sm')));
+        const body = el('div', { class: 'small muted' }, el('span', { class: 'spinner' }), ' 読み込み中...');
+        panel.replaceChildren(head, body);
+        panel.classList.add('er__panel--wide');
+
+        api(`/api/catalog/table-info?db=${encodeURIComponent(n.alias)}&table=${encodeURIComponent(n.table)}`,
+            undefined, 'GET').then(info => {
+            if (selected?.id !== id) return;          // 読んでいる間に別のものを選んだ
+            body.replaceChildren(...describeParts(info, n));
+        }).catch(e => {
+            body.replaceChildren(el('div', { class: 'alert alert--err small' }, e.message));
+        });
+    }
+
+    /** テーブルの中身（概要・列・サンプル行・主キー編集）。パネルの中身を作る。 */
+    function describeParts(info, n) {
+        const parts = [];
+        parts.push(el('div', { class: 'small', style: 'margin:6px 0 8px' },
+            info.description
+                ? el('span', {}, info.description,
+                    info.ai_draft ? el('span', { class: 'badge badge--accent', style: 'margin-left:6px' }, 'AI下書き') : null)
+                : el('span', { class: 'muted' }, '説明はまだ書かれていません。')));
+
+        // 列（型・PK・説明・実際の値）
+        const rows = (info.columns || []).map(c => el('tr', {},
+            el('td', {}, c.name, c.pk ? el('span', { class: 'badge', style: 'margin-left:4px' }, 'PK') : null),
+            el('td', { class: 'muted' }, c.type),
+            el('td', {}, c.description || el('span', { class: 'muted' }, '—')),
+            el('td', { class: 'muted', title: c.actual }, c.actual || '')));
+        parts.push(el('div', { class: 'tablewrap', style: 'max-height:200px' },
+            el('table', { class: 'data' },
+                el('thead', {}, el('tr', {}, ['列', '型', '説明', '実際の値'].map(h => el('th', {}, h)))),
+                el('tbody', {}, rows))));
+
+        // 用語（このテーブル固有）
+        const gl = Object.entries(info.glossary || {});
+        if (gl.length) {
+            parts.push(el('div', { class: 'small', style: 'margin-top:8px' },
+                el('b', {}, '業務用語: '),
+                gl.map(([t, e]) => `${t}（${e.description || e.sql || ''}）`).join('、')));
+        }
+
+        // サンプル行
+        if ((info.sample_rows || []).length) {
+            parts.push(el('div', { class: 'small muted', style: 'margin:8px 0 2px' }, 'サンプル行'));
+            parts.push(el('div', { class: 'tablewrap', style: 'max-height:160px' },
+                dataTable(info.sample_columns || [], info.sample_rows || [])));
+        }
+
+        // 主キーの編集（カタログ画面だけ。読み取り専用では出さない）
+        if (!ro && !n.external) {
+            const checks = n.columns.map(c => el('label',
+                { style: 'display:flex;gap:6px;align-items:center;font-size:12px' },
+                el('input', { type: 'checkbox', 'data-pk': c.name, ...(c.pk ? { checked: 'checked' } : {}) }),
+                c.name));
+            parts.push(el('details', { class: 'mt' },
+                el('summary', { class: 'small muted', style: 'cursor:pointer' }, '主キーを直す（鍵＝実線の下線）'),
+                el('div', { style: 'max-height:150px;overflow:auto;margin:6px 0' }, checks),
+                el('button', {
+                    class: 'btn btn--primary btn--sm',
+                    onclick: async () => {
+                        const cols = [...panel.querySelectorAll('[data-pk]')]
+                            .filter(c => c.checked).map(c => c.dataset.pk);
+                        pushUndo();
+                        const r = await api('/api/catalog/primary-key',
+                            { db: CAT.db, table: n.table, columns: cols });
+                        data = r.er; render(); closePanel(); toast('主キーを保存しました。');
+                    },
+                }, '主キーを保存')));
+        }
+        return parts;
     }
 
     /* --- 変更（サーバに保存して描き直す） ---------------------------------------- */
@@ -389,7 +457,7 @@ const ER = (() => {
                 const up = () => {
                     document.removeEventListener('pointermove', move);
                     document.removeEventListener('pointerup', up);
-                    if (!moved && !ro) selectTable(node.id);
+                    if (!moved) selectTable(node.id);   // 読み取り専用でも中身は見られる
                 };
                 document.addEventListener('pointermove', move);
                 document.addEventListener('pointerup', up);

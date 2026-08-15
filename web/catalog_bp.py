@@ -19,7 +19,7 @@ import sqlusage
 import tools
 import verify
 
-from .helpers import admin_required, dbs_in_sql, jsonable
+from .helpers import admin_required, dbs_in_sql, jsonable, login_required
 
 bp = Blueprint("catalog", __name__)
 
@@ -278,6 +278,55 @@ def relationship():
     catalog.save_meta(path, meta)
     profile = catalog.profile_db(path)
     return jsonify({"ok": True, "er": _er_payload(path, profile, catalog.load_meta(path))})
+
+
+@bp.get("/api/catalog/table-info")
+@login_required
+def table_info():
+    """ER図でテーブルをクリックしたときの中身（概要・列・実値・サンプル行）。
+
+    描画用のペイロードには入れていない（全テーブル分を持つと重い）ので、
+    開いたときに取りに来る。チャットの読み取り専用ER図からも使うので、
+    管理者に限らずログイン済みなら見られる（describe_table でAIに渡している
+    情報と同じ範囲）。
+    """
+    alias = request.args.get("db") or ""
+    tname = request.args.get("table") or ""
+    path = next((f for f in db.list_db_files() if db.alias_for(f) == alias), None)
+    if path is None:
+        return jsonify({"error": f"DB '{alias}' が見つかりません。"}), 404
+    profile, meta = catalog.profile_db(path), catalog.load_meta(path)
+    t = (profile.get("tables") or {}).get(tname)
+    if t is None:
+        return jsonify({"error": f"テーブル '{tname}' が見つかりません。"}), 404
+    tmeta = (meta.get("tables") or {}).get(tname) or {}
+    mcols = tmeta.get("columns") or {}
+    pk = set(catalog.effective_pk(profile, meta, tname)[0])
+    cols = []
+    for c in t.get("columns") or []:
+        cm = mcols.get(c["name"]) or {}
+        stat = (t.get("col_stats") or {}).get(c["name"]) or {}
+        if "values" in stat:
+            actual = ", ".join(str(v[0]) if isinstance(v, (list, tuple)) else str(v)
+                               for v in stat["values"][:8])
+        elif "min" in stat:
+            actual = f"{stat['min']} 〜 {stat['max']}"
+        else:
+            actual = ""
+        cols.append({"name": c["name"], "type": c.get("type") or "",
+                     "pk": c["name"] in pk,
+                     "description": cm.get("description") or "",
+                     "codes": cm.get("values") or {}, "actual": actual})
+    return jsonify({
+        "db": path.name, "alias": alias, "table": tname,
+        "rows": t.get("row_count"),
+        "description": tmeta.get("description") or "",
+        "ai_draft": bool(tmeta.get("ai_draft")),
+        "columns": cols,
+        "glossary": catalog.table_glossary(meta, tname),
+        "sample_columns": t.get("sample_columns") or [],
+        "sample_rows": jsonable((t.get("sample_rows") or [])[:5]),
+    })
 
 
 @bp.get("/api/catalog/er-tables")

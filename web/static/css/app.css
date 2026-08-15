@@ -871,7 +871,10 @@ details.acc.is-target {
     position: absolute; right: 10px; bottom: 10px; z-index: 6; width: 320px;
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px;
+    max-height: calc(100% - 20px); overflow: auto;
 }
+/* テーブルの中身（列・サンプル行）を出すときは広げる。キャンバスからはみ出さない幅に */
+.er__panel--wide { width: min(560px, calc(100% - 20px)); }
 .er__legend {
     position: absolute; left: 10px; bottom: 10px; z-index: 5; font-size: 11px;
     color: var(--muted); background: var(--surface); padding: 5px 9px;

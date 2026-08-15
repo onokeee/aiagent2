@@ -241,6 +241,59 @@ function catalogLinks(tables) {
         }, t.table)));
 }
 
+/* ER図のカード。図はその場に埋めず、開いたときにキャンバスを組み立てる。
+   （er.js は一度に1つの図しか持てないので、開いている間だけ実体を作る） */
+function erCard(item) {
+    return el('div', { class: 'filecard' },
+        icon('table', 'icon--lg'),
+        el('div', { class: 'grow' },
+            el('div', { class: 'name' }, item.title || (item.db + ' のER図')),
+            el('div', { class: 'small muted' },
+                'テーブルの関係図（読み取り専用・拡大縮小と全画面ができます）')),
+        el('button', { class: 'btn btn--primary btn--sm',
+                       onclick: () => openErModal(item) }, '表示'));
+}
+
+function openErModal(item) {
+    const back = el('div', { class: 'modal' });
+    const close = () => { back.remove(); };
+    back.addEventListener('click', ev => { if (ev.target === back) close(); });
+
+    const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svgEl.setAttribute('class', 'er__svg');
+    svgEl.id = 'erSvg';
+
+    // er.js が期待するIDでキャンバスの骨組みを作る（カタログ画面と同じ構造）
+    const box = el('div', { class: 'modal__box', style: 'max-width:96vw;width:1200px' },
+        el('div', { class: 'modal__head' },
+            el('b', { class: 'grow' }, item.title || (item.db + ' のER図')),
+            el('button', { class: 'btn btn--sm btn--ghost', onclick: close }, icon('x', 'icon--sm'))),
+        el('div', { class: 'modal__body', style: 'padding:10px' },
+            el('div', { class: 'er', id: 'erRoot', style: 'height:72vh' },
+                el('div', { class: 'er__toolbar' },
+                    el('button', { class: 'btn btn--sm', id: 'erFit' }, '全体を表示'),
+                    el('button', { class: 'btn btn--sm', id: 'erFull' }, '全画面')),
+                el('div', { class: 'er__viewport', id: 'erViewport' },
+                    svgEl,
+                    el('div', { class: 'er__world', id: 'erWorld' })),
+                el('div', { class: 'er__legend' },
+                    el('b', {}, 'IPA表記'), '　下線＝主キー　線の両端の 1・*＝多重度　',
+                    '実線＝登録済み／短い破線＝FOREIGN KEY　長い破線＝DBをまたぐ関連'),
+                el('div', { class: 'er__panel hidden', id: 'erPanel' }))));
+    back.append(box);
+    document.body.append(back);
+    ER.init({ data: item.er, readonly: true });
+    // Escは段階的に効かせる: 全画面中なら解除だけ(er.jsに任せる)、通常表示なら閉じる。
+    // capture=true で er.js より先に状態を見る（同じイベントで両方起きるのを防ぐ）
+    document.addEventListener('keydown', function esc(ev) {
+        if (ev.key !== 'Escape') return;
+        const root = document.getElementById('erRoot');
+        if (root && root.classList.contains('er--full')) return;   // 解除はer.js側
+        document.removeEventListener('keydown', esc, true);
+        close();
+    }, true);
+}
+
 function addItem(item) {
     const body = slot(item.role === 'user' ? 'user' : 'assistant');
     if (item.kind === 'text' && item.role === 'user' && item.turn !== undefined) {
@@ -307,6 +360,8 @@ function addItem(item) {
                 el('summary', {}, `「${s.name}」の内容を確認（先頭${s.rows.length}行）`),
                 el('div', { class: 'acc__body' }, dataTable(s.columns, s.rows))));
         });
+    } else if (item.kind === 'er') {
+        body.append(erCard(item));
     } else if (item.kind === 'report') {
         body.append(reportBlock(item));
     } else if (item.kind === 'report_doc') {

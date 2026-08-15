@@ -1314,6 +1314,29 @@ BUILTIN_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "show_er_diagram",
+            "description": (
+                "DBのER図（テーブル同士の関係図）をチャット画面に表示する。"
+                "「ER図を見せて」「テーブルの関係を図で」「データ構造を見たい」"
+                "と言われたら使う。図は読み取り専用で、利用者が拡大縮小・全画面表示できる。"
+                "表示と同時に結合の一覧も返るので、それを踏まえて補足してよい。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "db": {"type": "string",
+                           "description": "対象のDBファイル名（例: demo_sales.db）。"
+                                          "質問がどのDBの話かはカタログの説明から判断する。"},
+                    "purpose": {"type": "string",
+                                "description": "何を確かめたくて表示するかの短い説明。"},
+                },
+                "required": ["db"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "analyze_usage",
             "description": (
                 "このアプリ自身の使われ方（利用状況）を調べる。分析対象のDBの中身ではなく、"

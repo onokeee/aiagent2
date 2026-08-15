@@ -11,6 +11,10 @@ const ER = (() => {
     let selected = null;          // {type:'edge'|'table', ...}
     let undoStack = [];
     let root, viewport, world, svg, panel;
+    // 読み取り専用（チャットからの表示）。編集の入口だけを閉じ、
+    // 移動・パン・ズーム・全画面はそのまま使えるようにする。
+    let ro = false;
+    let docWired = false;         // documentへのキーハンドラは1回だけ張る
     // 過去の分析で実際に使われた結合の回数（{ "a.t.c||a.t.c": n }）。
     // 宣言された関連の上に「本当に通っている道」を重ねるためのもの。
     let usage = null;
@@ -147,7 +151,7 @@ const ER = (() => {
             // pointerdown を止めるのが肝。止めないとキャンバスのパン処理が走り、
             // その中の再描画でこのパス自体が差し替わって click が発火しなくなる。
             hit.addEventListener('pointerdown', ev => ev.stopPropagation());
-            hit.addEventListener('click', ev => { ev.stopPropagation(); selectEdge(e); });
+            hit.addEventListener('click', ev => { ev.stopPropagation(); if (!ro) selectEdge(e); });
             svg.append(hit);
 
             const path = document.createElementNS(NS, 'path');
@@ -385,13 +389,13 @@ const ER = (() => {
                 const up = () => {
                     document.removeEventListener('pointermove', move);
                     document.removeEventListener('pointerup', up);
-                    if (!moved) selectTable(node.id);
+                    if (!moved && !ro) selectTable(node.id);
                 };
                 document.addEventListener('pointermove', move);
                 document.addEventListener('pointerup', up);
             });
 
-            box.querySelectorAll('.erhandle').forEach(h => {
+            if (!ro) box.querySelectorAll('.erhandle').forEach(h => {
                 h.addEventListener('pointerdown', ev => {
                     ev.stopPropagation(); ev.preventDefault();
                     startLink(node, h.dataset.handle, h.dataset.side, ev);
@@ -596,20 +600,25 @@ const ER = (() => {
         render();
     }
 
-    function init() {
+    function init(opts) {
         root = $('#erRoot'); viewport = $('#erViewport');
         world = $('#erWorld'); svg = $('#erSvg'); panel = $('#erPanel');
         if (!root) return;
-        data = CAT.er;
+        ro = !!(opts && opts.readonly);
+        data = (opts && opts.data) || (typeof CAT !== 'undefined' ? CAT.er : null);
+        if (!data) return;
+        // チャットでは開くたびに init し直すので、前回の状態を持ち越さない
+        view = { tx: 40, ty: 40, k: 1 };
+        selected = null; undoStack = [];
         svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%');
         render();
         wireViewport();
         setTimeout(fit, 30);
 
-        $('#erSave').addEventListener('click', saveLayout);
-        $('#erUndo').addEventListener('click', undo);
-        $('#erFit').addEventListener('click', fit);
-        $('#erFull').addEventListener('click', () => {
+        $('#erSave')?.addEventListener('click', saveLayout);
+        $('#erUndo')?.addEventListener('click', undo);
+        $('#erFit')?.addEventListener('click', fit);
+        $('#erFull')?.addEventListener('click', () => {
             root.classList.toggle('er--full');
             $('#erFull').textContent = root.classList.contains('er--full') ? '全画面を終了' : '全画面';
             setTimeout(fit, 60);
@@ -624,9 +633,15 @@ const ER = (() => {
             syncUsageUi();
             drawEdges();
         });
-        document.addEventListener('keydown', ev => {
-            if (ev.key === 'Escape' && root.classList.contains('er--full')) $('#erFull').click();
-        });
+        if (!docWired) {
+            docWired = true;
+            // root は init のたびに差し替わるので、この1本のハンドラで常に最新を見る
+            document.addEventListener('keydown', ev => {
+                if (ev.key === 'Escape' && root && root.classList.contains('er--full')) {
+                    $('#erFull')?.click();
+                }
+            });
+        }
     }
 
     function syncUsageUi() {

@@ -1,6 +1,7 @@
 """調べる・集計する・描く・出す。SQLの結果をそのまま扱うツール。"""
 from __future__ import annotations
 
+from pathlib import Path
 
 import advanced
 import analysis
@@ -252,6 +253,59 @@ def _analyze_stats(args: dict, scope: list[dict]) -> dict:
     }
 
 
+def _show_er_diagram(args: dict, scope: list[dict]) -> dict:
+    """ER図をチャットに出す（読み取り専用）。
+
+    描くのはカタログ画面と同じキャンバス（er.js）。データも同じ er_payload なので、
+    画面で見える図とAIの理解（結合定義）は必ず一致する。
+    """
+    import db as dbmod
+
+    files = dbmod.list_db_files()
+    if not files:
+        return _err("data/ にDBがありません。")
+    name = str(args.get("db") or "").strip()
+    target = None
+    if name:
+        low = name.lower()
+        target = next((f for f in files
+                       if low in (f.name.lower(), f.stem.lower(),
+                                  dbmod.alias_for(f).lower())), None)
+        if target is None:
+            return _err(f"DB '{name}' が見つかりません。指定できるのは: "
+                        + "、".join(f.name for f in files))
+    elif len(scope) == 1:
+        target = Path(scope[0]["path"])
+    else:
+        return _err("どのDBのER図かを db で指定してください。候補: "
+                    + "、".join(s_["name"] for s_ in scope))
+
+    try:
+        payload = catalog.er_payload(target)
+    except Exception as e:
+        return _err(f"ER図データの組み立てに失敗しました: {e}")
+
+    own = [n for n in payload["nodes"] if not n.get("external")]
+    rels = [{"from": ".".join(str(x) for x in e["from"]),
+             "to": ".".join(str(x) for x in e["to"]),
+             "cardinality": e.get("cardinality") or "",
+             "kind": "FOREIGN KEY宣言" if e.get("kind") == "fk" else "カタログ登録"}
+            for e in payload["edges"]]
+    return {
+        "ok": True,
+        "llm_content": _json({
+            "status": "er_ready", "db": target.name,
+            "tables": [n["table"] for n in own],
+            "borrowed_tables": payload.get("extra") or [],
+            "relationships": rels[:60],
+            "note": "ER図はユーザーの画面に表示済み。関係を文章で説明し直す必要はない。"
+                    "結合の一覧は上の relationships のとおり。",
+        }),
+        "render": {"role": "assistant", "kind": "er", "db": target.name,
+                   "title": f"{target.name} のER図", "er": payload},
+    }
+
+
 def _export_excel(args: dict, scope: list[dict]) -> dict:
     sheets_in = args.get("sheets") or []
     if not sheets_in:
@@ -407,6 +461,7 @@ def _export_text(args: dict, scope: list[dict]) -> dict:
 HANDLERS = {
     "run_sql_query": _run_sql_query,
     "describe_table": _describe_table,
+    "show_er_diagram": _show_er_diagram,
     "pivot_table": _pivot_table,
     "analyze_stats": _analyze_stats,
     "plot_chart": _plot_chart,

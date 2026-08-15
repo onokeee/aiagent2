@@ -50,6 +50,7 @@ TOOL_LABELS = {
     "export_text": "テキスト作成",
     "export_pptx": "PowerPoint作成",
     "describe_table": "テーブル詳細の確認",
+    "show_er_diagram": "ER図の表示",
     "hypothesis_test": "仮説検定",
     "regression": "回帰分析",
     "distribution_analysis": "分布の分析",

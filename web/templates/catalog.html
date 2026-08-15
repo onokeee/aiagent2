@@ -139,7 +139,17 @@
         {% if t.sample_rows %}
         <details class="acc mt">
           <summary>サンプル行を見る</summary>
-          <div class="acc__body"><div class="tablewrap"><table class="data">
+          <div class="acc__body">
+          {# 先頭数行だけでは判断できないので、全行を別タブで開く入口を必ず置く #}
+          <div class="row mb" style="align-items:center">
+            <span class="small muted">先頭 {{ t.sample_rows|length }} 行のみ</span>
+            <div class="spacer"></div>
+            <a class="btn btn--sm btn--ghost" target="_blank" rel="noopener"
+               title="{{ t.name }} の全行を別タブで開きます（読み取り専用）"
+               href="{{ url_for('tableview.index') }}?db={{ target|urlencode }}&table={{ t.name|urlencode }}"
+               >{{ icon('table', 'icon--sm') }}テーブル全体を閲覧</a>
+          </div>
+          <div class="tablewrap"><table class="data">
             <thead><tr>{% for c in t.sample_columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
             <tbody>{% for r in t.sample_rows %}<tr>{% for v in r %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
           </table></div></div>

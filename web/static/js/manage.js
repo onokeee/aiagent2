@@ -294,9 +294,10 @@ function tableCard(dbName, t) {
     const sampleBox = el('div', { class: 'mt' }, el('div', { class: 'small muted' }, '—'));
     const histBox = el('div', { class: 'mt' }, el('div', { class: 'small muted' }, '—'));
     body.append(
-        el('div', { class: 'row mt', style: 'align-items:center' },
+        el('div', { class: 'row mt', style: 'align-items:center;gap:6px' },
             el('div', { style: 'font-weight:700' }, 'サンプル行'),
             el('div', { class: 'spacer' }),
+            tableViewLink(dbName, t.name),
             el('button', {
                 class: 'btn btn--sm btn--ghost',
                 onclick: () => loadTableDetail(dbName, t.name, sampleBox, histBox, true),

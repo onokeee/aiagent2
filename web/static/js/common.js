@@ -32,6 +32,19 @@ function el(tag, attrs = {}, ...children) {
     return node;
 }
 
+/* 「テーブル全体を閲覧」ボタン。サンプル行を出している所には必ずこれを添える。
+   先頭数行だけでは「本当にこのテーブルでよいか」は決められないので、
+   別タブ（読み取り専用のビューア）で中身を辿れるようにする。
+   db はファイル名（sales.db）でもエイリアス（sales）でもよい。 */
+function tableViewLink(dbName, table, cls = 'btn btn--sm btn--ghost') {
+    if (!dbName || !table) return null;
+    const href = `/table?db=${encodeURIComponent(dbName)}&table=${encodeURIComponent(table)}`;
+    return el('a', {
+        class: cls, href, target: '_blank', rel: 'noopener',
+        title: `${table} の全行を別タブで開きます（読み取り専用）`,
+    }, icon('table', 'icon--sm'), 'テーブル全体を閲覧');
+}
+
 function toast(message, kind = 'ok', ms = 4200) {
     const box = $('#toasts');
     if (!box) return;

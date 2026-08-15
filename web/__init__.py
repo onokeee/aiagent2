@@ -81,13 +81,14 @@ def create_app() -> Flask:
     )
 
     from . import (api_bp, auth_bp, catalog_bp, chat_bp, import_bp, mail_bp,
-                   models_bp)
+                   models_bp, table_bp)
     app.register_blueprint(auth_bp.bp)
     app.register_blueprint(chat_bp.bp)
     app.register_blueprint(catalog_bp.bp)
     app.register_blueprint(import_bp.bp)
     app.register_blueprint(mail_bp.bp)
     app.register_blueprint(models_bp.bp)
+    app.register_blueprint(table_bp.bp)
     app.register_blueprint(api_bp.bp)
 
     from .helpers import inject_globals, load_user_into_context

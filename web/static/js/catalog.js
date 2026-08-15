@@ -455,7 +455,13 @@ function sampleAcc(t) {
     if (!t.sample_rows?.length) return null;
     return el('details', { class: 'acc mt' },
         el('summary', {}, 'サンプル行を見る'),
-        el('div', { class: 'acc__body' }, dataTable(t.sample_columns, t.sample_rows)));
+        el('div', { class: 'acc__body' },
+            el('div', { class: 'row mb', style: 'align-items:center' },
+                el('span', { class: 'small muted' },
+                    `先頭 ${t.sample_rows.length} 行のみ`),
+                el('div', { class: 'spacer' }),
+                tableViewLink(CAT.db, t.name)),
+            dataTable(t.sample_columns, t.sample_rows)));
 }
 
 function rowsLabel(t) {

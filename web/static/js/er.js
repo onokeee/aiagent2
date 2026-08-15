@@ -438,9 +438,12 @@ const ER = (() => {
                 gl.map(([t, e]) => `${t}（${e.description || e.sql || ''}）`).join('、')));
         }
 
-        // サンプル行
+        // サンプル行（全体は別タブのビューアで見る）
         if ((info.sample_rows || []).length) {
-            parts.push(el('div', { class: 'small muted', style: 'margin:8px 0 2px' }, 'サンプル行'));
+            parts.push(el('div', { class: 'row', style: 'align-items:center;margin:8px 0 2px' },
+                el('span', { class: 'small muted' }, 'サンプル行'),
+                el('div', { class: 'spacer' }),
+                tableViewLink(info.alias || info.db, info.table)));
             parts.push(el('div', { class: 'tablewrap', style: 'max-height:160px' },
                 dataTable(info.sample_columns || [], info.sample_rows || [])));
         }

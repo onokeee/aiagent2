@@ -93,8 +93,13 @@ def _run_custom(tool: dict, args: dict, scope: list[dict]) -> dict:
     # ツールは作るときにDBを意識させないので、SQLが選択外のDBに入ることがある。
     # 必要なぶんは繋いでから実行する（結果を預ける先も同じ範囲にする）。
     scope = db.widen_scope(sql, scope)
+    # ファイルに出すツールは全行（Excelはシート上限で丸める）。画面用は2,000行。
+    kind_ = tool.get("render") or "table"
+    cap = (min(config.EXPORT_MAX_ROWS, 1_048_575) if kind_ in ("excel", "csv")
+           else None)
     try:
-        columns, rows, truncated = db.run_select(sql, scope, params=params)
+        columns, rows, truncated = db.run_select(sql, scope, params=params,
+                                                 max_rows=cap)
     except Exception as e:
         return _err(f"ツール '{tool.get('name')}' のSQL実行エラー: {e}")
 
@@ -106,7 +111,8 @@ def _run_custom(tool: dict, args: dict, scope: list[dict]) -> dict:
     # ユーザー定義ツールだけ返しておらず、「このツールの結果をグラフにして」と
     # 言われてもAIには渡す手段が無かった（SQLはAIに見せていないので取り直せない）。
     # これがあれば、表で作ったツールでも後からグラフ・Excel・統計に回せる。
-    rid = _results.put(scope, columns, rows, truncated,
+    keep = rows[: config.MAX_RESULT_ROWS]
+    rid = _results.put(scope, columns, keep, truncated or len(rows) > len(keep),
                        sql=sql, label=f"{tool.get('name')}（ユーザー定義ツール）")
     llm_content = _json({
         "tool": tool.get("name"),

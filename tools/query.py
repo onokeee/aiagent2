@@ -260,15 +260,19 @@ def _export_excel(args: dict, scope: list[dict]) -> dict:
     built, summary = [], []
     for i, sh in enumerate(sheets_in, start=1):
         name = (sh or {}).get("name") or f"Sheet{i}"
+        # ファイルには全行入れる（画面向けの2,000行とは別枠）。
+        # Excelのシートは仕様上 1,048,576 行までなので、見出しぶんを引いて丸める。
+        cap = min(config.EXPORT_MAX_ROWS, 1_048_575)
         try:
-            columns, rows, truncated, _, _ = fetch(sh or {}, scope, label=name)
+            columns, rows, truncated, _, _ = fetch(sh or {}, scope, label=name,
+                                                   max_rows=cap)
         except advanced.AnalysisError as e:
             return _err(f"シート '{name}': {e}")
         except Exception as e:
             return _err(f"シート '{name}' のSQL実行エラー: {e}")
         note = (sh or {}).get("note") or ""
         if truncated:
-            note = (note + f"（{config.MAX_RESULT_ROWS}行で切り詰め）").strip()
+            note = (note + f"（{cap:,}行で切り詰め）").strip()
         charts = (sh or {}).get("charts") or (sh or {}).get("chart")
         if isinstance(charts, dict):
             charts = [charts]
@@ -313,7 +317,8 @@ def _export_csv(args: dict, scope: list[dict]) -> dict:
     for i, f in enumerate(files_in, start=1):
         name = (f or {}).get("name") or f"data{i}"
         try:
-            columns, rows, truncated, _, _ = fetch(f or {}, scope, label=name)
+            columns, rows, truncated, _, _ = fetch(f or {}, scope, label=name,
+                                                   max_rows=config.EXPORT_MAX_ROWS)
         except advanced.AnalysisError as e:
             return _err(f"'{name}': {e}")
         except Exception as e:
@@ -358,7 +363,8 @@ def _export_text(args: dict, scope: list[dict]) -> dict:
     for sec in (args.get("sections") or []):
         heading = str((sec or {}).get("heading") or "")
         try:
-            columns, rows, truncated, _, _ = fetch(sec or {}, scope, label=heading)
+            columns, rows, truncated, _, _ = fetch(sec or {}, scope, label=heading,
+                                                   max_rows=config.EXPORT_MAX_ROWS)
         except advanced.AnalysisError as e:
             return _err(f"セクション '{heading}': {e}")
         except Exception as e:

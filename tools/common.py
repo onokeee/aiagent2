@@ -40,12 +40,17 @@ def _total_rows(sql: str, scope: list[dict]) -> int | None:
         return None
 
 
-def fetch(spec: dict, scope: list[dict], *, label: str | None = None):
+def fetch(spec: dict, scope: list[dict], *, label: str | None = None,
+          max_rows: int | None = None):
     """ツールが使うデータを用意する。
 
     spec に result_id があれば前の結果を使い、無ければ sql を実行する。
     どちらの道でも result_id を返すので、呼び出し側はそれをLLMに伝えて
     次のツールで使い回せるようにする。
+
+    max_rows は取得の上限。省略時は画面向けの MAX_RESULT_ROWS(2,000)。
+    ファイル出力は EXPORT_MAX_ROWS を渡してくる。「表とグラフは2,000行で足りるが、
+    CSVは全行欲しい」ので、道具ごとに上限が違う。
 
     戻り値: (columns, rows, truncated, result_id, total_rows)
       total_rows は切り詰めが起きたときだけ入る（本当の総件数）。
@@ -58,6 +63,16 @@ def fetch(spec: dict, scope: list[dict], *, label: str | None = None):
                 f"result_id '{rid}' のデータが見つかりません。"
                 "古くなって捨てられたか、別のDBを選んでいたときの結果です。"
                 "sql を指定して取り直してください。")
+        # 預かっているのは2,000行に切り詰めた結果のことがある。ファイル出力のように
+        # もっと大きな上限で全行欲しい呼び出しなら、預けたときのSQLで取り直す。
+        # （「集計→CSVに」の流れで、CSVだけ2,000行で欠ける事故を防ぐ）
+        if (max_rows and entry["truncated"] and entry.get("sql")
+                and max_rows > len(entry["rows"])):
+            sql = entry["sql"]
+            wide = db.widen_scope(sql, scope)
+            columns, rows, truncated = db.run_select(sql, wide, max_rows=max_rows)
+            return columns, rows, truncated, rid, (
+                _total_rows(sql, wide) if truncated else None)
         return entry["columns"], entry["rows"], entry["truncated"], rid, None
 
     sql = str((spec or {}).get("sql") or "").strip()
@@ -68,18 +83,23 @@ def fetch(spec: dict, scope: list[dict], *, label: str | None = None):
     # スコープは質問ごとの自動判定なので、例文由来のSQLなどが範囲外のDBを
     # 名指しすることがある。必要なぶんは繋いで実行する（読み取り専用のまま）。
     scope = db.widen_scope(sql, scope)
-    columns, rows, truncated = db.run_select(sql, scope)
-    rid = results.put(scope, columns, rows, truncated, sql=sql, label=label)
+    columns, rows, truncated = db.run_select(sql, scope, max_rows=max_rows)
+    # 使い回し用の預かりは、後続の表・グラフに足りる行数まで。
+    # 100万行をそのまま預けると、これ1つで置き場(MAX_CELLS)を食い潰すため。
+    keep = rows[: config.MAX_RESULT_ROWS]
+    rid = results.put(scope, columns, keep, truncated or len(rows) > len(keep),
+                      sql=sql, label=label)
     return columns, rows, truncated, rid, (_total_rows(sql, scope) if truncated else None)
 
 
-def source_note(row_count: int, truncated: bool, total: int | None) -> dict:
+def source_note(row_count: int, truncated: bool, total: int | None,
+                cap: int | None = None) -> dict:
     """LLMに渡す「元データの規模」。切り詰めのときは実際の件数も添える。"""
     out = {"source_row_count": row_count, "source_truncated": bool(truncated)}
     if truncated:
         out["source_total_rows"] = total
         out["warning"] = (
-            f"上限 {config.MAX_RESULT_ROWS} 行で切り詰めました。"
+            f"上限 {cap or config.MAX_RESULT_ROWS:,} 行で切り詰めました。"
             + (f"実際は {total:,} 行あります。" if total else "")
             + "この結果は全体の一部です。全体を語るなら、SQL側で"
               "GROUP BY で集計するか、条件を絞って取り直してください。")

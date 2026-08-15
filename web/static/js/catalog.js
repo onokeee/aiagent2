@@ -191,6 +191,65 @@ async function saveAllDirty() {
     if (!dirtyLabel()) toast('すべて保存しました。');
 }
 
+/* --- 管理（取り込み元・定期取り込み・更新履歴・削除） -----------------------------
+   取り込み画面の「DBの管理」タブにあったものを、DBを見ているこの画面に集約した。
+   描画は manage.js（両画面で共有）。ここでは /api/import/manage から
+   このDBの分だけを取り出して、各テーブルの「管理」とDB情報の行に流し込む。 */
+let manageData = null;
+
+async function loadManage(force) {
+    if (manageData && !force) return manageData;
+    try {
+        const m = await api('/api/import/manage', undefined, 'GET');
+        manageData = m;
+    } catch (e) {
+        $('#dbManageInfo') && ($('#dbManageInfo').textContent = e.message);
+        return null;
+    }
+    const d = (manageData.dbs || []).find(x => x.name === CAT.db);
+    // DB情報の行: サイズ・更新日・削除ボタン
+    const info = $('#dbManageInfo'), slot = $('#dbDeleteSlot');
+    if (info && d) {
+        info.textContent = `${d.tables.length}テーブル ・ `
+            + `${((d.size || 0) / 1024).toLocaleString(undefined, { maximumFractionDigits: 0 })} KB`
+            + ` ・ 更新 ${d.mtime || '―'}`;
+        slot.replaceChildren(dbDeleteButton(d));
+    }
+    // 各テーブルの「管理」: 開いているものだけ描く（未開封は開いたときに描く）
+    $$('.t-manage').forEach(acc => {
+        if (acc.open) renderTableManage(acc);
+    });
+    return manageData;
+}
+
+/** テーブル1つぶんの管理欄を描く（manage.js の tableCard の中身を流用）。 */
+function renderTableManage(acc) {
+    const body = $('.t-manage__body', acc);
+    const d = (manageData?.dbs || []).find(x => x.name === CAT.db);
+    const t = d?.tables.find(x => x.name === acc.dataset.table);
+    if (!t) {
+        body.replaceChildren(el('div', { class: 'small muted' }, '管理情報を取得できませんでした。'));
+        return;
+    }
+    // tableCard は <details> を返す。中身の acc__body だけをここに載せる
+    const card = tableCard(CAT.db, t);
+    const inner = card.querySelector('.acc__body');
+    body.replaceChildren(...(inner ? [...inner.childNodes] : []));
+    // 中身のサンプル行と更新履歴は、tableCard 側が toggle 時に読む設計なので手で呼ぶ
+    const sampleBox = inner?.__sampleBox, histBox = inner?.__histBox;
+    if (sampleBox && histBox) loadTableDetail(CAT.db, t.name, sampleBox, histBox);
+}
+
+function wireManage() {
+    $$('.t-manage').forEach(acc => acc.addEventListener('toggle', async () => {
+        if (!acc.open) return;
+        await loadManage();
+        renderTableManage(acc);
+    }));
+    // DB情報を開いたときにサイズ・削除ボタンを出す
+    $('#dbInfo')?.addEventListener('toggle', ev => { if (ev.target.open) loadManage(); });
+}
+
 function wireTables() {
     // どの入力欄をいじっても、そのテーブルに「未保存」の印を付ける
     $('#pane-tables').addEventListener('input', ev => {
@@ -1815,6 +1874,7 @@ function wireMisc() {
 
 document.addEventListener('DOMContentLoaded', () => {
     wireTables();
+    wireManage();
     wireTableFilter();
     loadGlossaryAll();
     wireGlossary();

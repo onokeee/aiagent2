@@ -13,6 +13,7 @@ import catalog_history
 import charts
 import custom_tools
 import db
+import jobs
 import llm
 import sqlusage
 import tools
@@ -175,6 +176,7 @@ def index():
         builtin_overrides=meta.get("builtin_tools") or {},
         cat_history=[{**r, "summary": catalog_history.summarize(r)}
                      for r in catalog_history.recent(50)],
+        intervals=list(jobs.INTERVALS.keys()),
         llm_ready=llm.is_configured(),
     )
 

@@ -6,7 +6,7 @@
 <div class="content">
   <div class="tabs">
     <button class="tab is-active" data-pane="file">ファイルから取り込む</button>
-    <button class="tab" data-pane="manage">DBの管理（定期取り込み）</button>
+    <button class="tab" data-pane="manage">定期取り込み</button>
   </div>
 
   <!-- ================= 取り込み ================= -->
@@ -74,18 +74,19 @@
     <div id="previewArea"></div>
   </div>
 
-  <!-- ============ DBの管理（定期取り込みもここに集約） ============ -->
+  <!-- ============ 定期取り込み ============ -->
   <div class="tabpane" id="pane-manage">
     <div id="schedBanner"></div>
     <div class="row mb" style="align-items:center">
-      <div class="card__title" style="margin:0">いま data/ にあるDBとテーブル</div>
+      <div class="card__title" style="margin:0">定期取り込みが設定されているテーブル</div>
       <div class="spacer"></div>
       <button class="btn btn--sm" id="runDue">期限が来たものを今すぐ更新</button>
       <button class="btn btn--sm btn--ghost" id="refreshTables">状態を更新</button>
     </div>
     <div class="small muted mb">
-      定期取り込みの設定は、更新の対象になっているテーブルの中にあります。
       テーブル名をクリックすると、取り込み元・更新の頻度・中身が開きます。
+      DBとテーブルの一覧・削除は
+      <a href="{{ url_for('catalog.index') }}">データカタログ &gt; DB・テーブル</a> にあります。
     </div>
     <div id="dbDetails"></div>
     <div id="orphanJobs"></div>
@@ -122,6 +123,8 @@ window.IMP = {
   maxKeep: {{ max_keep|tojson }},
   defaultKeep: {{ default_keep|tojson }}
 };
+window.MANAGE = { intervals: {{ intervals|tojson }}, refresh: () => refreshManage() };
 </script>
+<script src="{{ url_for('static', filename='js/manage.js') }}"></script>
 <script src="{{ url_for('static', filename='js/import.js') }}"></script>
 {% endblock %}

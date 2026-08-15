@@ -269,7 +269,7 @@ function openErModal(item) {
             el('b', { class: 'grow' }, item.title || (item.db + ' のER図')),
             el('button', { class: 'btn btn--sm btn--ghost', onclick: close }, icon('x', 'icon--sm'))),
         el('div', { class: 'modal__body', style: 'padding:10px' },
-            el('div', { class: 'er', id: 'erRoot', style: 'height:72vh' },
+            el('div', { class: 'er er--chat', id: 'erRoot' },
                 el('div', { class: 'er__toolbar' },
                     el('button', { class: 'btn btn--sm', id: 'erFit' }, '全体を表示'),
                     el('button', { class: 'btn btn--sm', id: 'erFull' }, '全画面')),

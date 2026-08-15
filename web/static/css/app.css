@@ -790,6 +790,9 @@ details.acc.is-target {
 
 .er { position: relative; border: 1px solid var(--border); border-radius: var(--radius);
       background: var(--surface); overflow: hidden; height: 620px; }
+/* チャットのモーダル内での高さ。インラインstyleにすると .er--full の100vhが
+   上書きできず「全画面なのに下が欠ける」ことになるため、必ずクラスで与える */
+.er--chat { height: 72vh; }
 .er--full { position: fixed; inset: 0; z-index: 200; height: 100vh; border-radius: 0; }
 .er__toolbar {
     position: absolute; top: 10px; left: 10px; z-index: 6; display: flex; gap: 6px;

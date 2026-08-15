@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import threading
+import os
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -158,6 +159,29 @@ def list_jobs() -> list[dict]:
 
 def get_job(job_id: str) -> dict | None:
     return next((j for j in _read() if j.get("id") == job_id), None)
+
+
+def _same_target(a: dict, b: dict) -> bool:
+    """同じ取り込み元（ファイル＋シート）を同じDBの同じテーブルへ入れる設定か。"""
+    def norm_path(p):
+        return os.path.normcase(os.path.normpath(str(p or "").strip()))
+    return (norm_path(a.get("source")) == norm_path(b.get("source"))
+            and (a.get("sheet") or None) == (b.get("sheet") or None)
+            and (a.get("db_file") or "") == (b.get("db_file") or "")
+            and (a.get("table") or "") == (b.get("table") or ""))
+
+
+def find_duplicate(job: dict) -> dict | None:
+    """同じ取り込み元→同じテーブルの設定がすでにあれば、それを返す（自分自身は除く）。
+
+    同じ設定が2つあると、同じ時刻に2回追記されて全行が二重になる
+    （「保持N回」は取得日時で数えるので、同時刻の2バッチを1回分とみなして両方残す）。
+    登録時に止めるためのもの。
+    """
+    for j in _read():
+        if j.get("id") != job.get("id") and _same_target(j, job):
+            return j
+    return None
 
 
 def save_job(job: dict) -> dict:

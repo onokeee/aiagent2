@@ -78,7 +78,7 @@ def _manage_view() -> dict:
 
     orphans = [_job_row(j) for key, js in by_target.items() if key not in used for j in js]
     return {"dbs": dbs, "orphans": orphans, "locked": _locked_tables(),
-            "sched": scheduler.status(), "due": len(jobs.due_jobs())}
+            "sched": scheduler.status()}
 
 
 def _locked_tables() -> dict:
@@ -440,6 +440,13 @@ def job_save():
     errors = jobs.validate(draft)
     if errors:
         return jsonify({"error": " / ".join(errors)}), 400
+    # 同じ取り込み元→同じテーブルは1つだけ。2つあると同時刻に2回追記されて全行が二重になる
+    dup = jobs.find_duplicate(draft)
+    if dup:
+        return jsonify({"error":
+                        f"この取り込み元と保存先の定期取り込み「{dup.get('name')}」はすでに登録されています"
+                        f"（{jobs.interval_label(dup.get('interval_minutes') or 0)}）。"
+                        "頻度や停止はデータカタログの各テーブルの「管理」で変更できます。"}), 400
     if draft["mode"] == "append":
         draft["keep_runs"] = int(draft["keep_runs"])
     return jsonify({"ok": True, "job": _job_row(jobs.save_job(draft))})
@@ -451,16 +458,13 @@ def job_run():
     body = request.json or {}
     # 画面から押した実行は、裏のスケジューラと区別できるように印を付けて履歴に残す
     who = getattr(g.user, "username", None)
-    if body.get("all_due"):
-        results = jobs.run_due(kind="job", user=who)
-    else:
-        job = jobs.get_job(body.get("id", ""))
-        if job is None:
-            return jsonify({"error": "ジョブが見つかりません。"}), 404
-        blocked = jobs.manual_run_blocked(job)
-        if blocked:
-            return jsonify({"error": blocked}), 400
-        results = [(job, jobs.run_job(job, kind="job", user=who))]
+    job = jobs.get_job(body.get("id", ""))
+    if job is None:
+        return jsonify({"error": "ジョブが見つかりません。"}), 404
+    blocked = jobs.manual_run_blocked(job)
+    if blocked:
+        return jsonify({"error": blocked}), 400
+    results = [(job, jobs.run_job(job, kind="job", user=who))]
     for j, r in results:
         if r["ok"]:
             catalog.profile_db(config.DATA_DIR / j["db_file"], force=True)
@@ -495,9 +499,3 @@ def job_delete():
     return jsonify({"ok": True, "jobs": [_job_row(x) for x in jobs.list_jobs()]})
 
 
-@bp.get("/api/jobs/status")
-@admin_required
-def job_status():
-    return jsonify({"sched": scheduler.status(),
-                    "jobs": [_job_row(x) for x in jobs.list_jobs()],
-                    "due": len(jobs.due_jobs())})

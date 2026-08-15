@@ -54,13 +54,9 @@
   <!-- ================= DB・テーブル ================= -->
   <div class="tabpane is-active" id="pane-tables">
     {# 定期取り込みの全体状態（DBに紐づかない）。スケジューラが動いているか、
-       期限が来たものの実行、対象テーブルが無くなった設定の始末。中身は manage.js が描く #}
+       対象テーブルが無くなった設定の始末。中身は manage.js が描く #}
     <div id="schedBanner"></div>
-    <div class="row mb" style="align-items:center">
-      <span class="small muted">定期取り込みの状態は自動で更新されます。テーブルごとの設定は各テーブルの「管理」にあります。</span>
-      <div class="spacer"></div>
-      <button class="btn btn--sm" id="runDue">期限が来たものを今すぐ更新</button>
-    </div>
+    <div class="small muted mb">定期取り込みの状態は自動で更新されます。テーブルごとの設定は各テーブルの「管理」にあります。</div>
     <div id="orphanJobs"></div>
 
     {# DB全体の説明。ふだん見るのはテーブル一覧なので畳んでおく。

@@ -402,14 +402,19 @@ async function runImport(ev) {
 async function saveJob() {
     const bad = formProblems(true);
     if (bad.length) { bad.forEach(m => toast(m, 'warn')); return; }
+    // 送信中はボタンを止める。二重クリックで同じ設定が2件できるのを防ぐ
+    // （サーバ側でも同じ取り込み元→同じテーブルは弾く）
+    const btn = $('#saveJob');
+    if (btn) { btn.disabled = true; btn.textContent = '登録中…'; }
     try {
         await api('/api/jobs/save', {
             ...importPayload(), name: $('#jobName').value, interval: $('#jobInterval').value,
             start_at: $('#jobStart').value,
         });
-        toast('定期取り込みに登録しました。「DBの管理」タブで確認できます。');
+        toast('定期取り込みに登録しました。データカタログの各テーブルの「管理」で確認できます。');
         refreshLocked();
     } catch (e) { toast(e.message, 'err', 9000); }
+    if (btn) { btn.disabled = false; btn.textContent = '登録する'; }
 }
 
 /* --- 手で更新してはいけないテーブル ---------------------------------------------

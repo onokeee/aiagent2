@@ -171,69 +171,44 @@ function bar(usedPct, limitPct) {
 }
 
 function renderBudget() {
-    const inp = $('#inlineLimit');
-    if (state.prompt_inline_limit && inp.value === '') {
-        inp.value = state.prompt_inline_limit;
-    }
-    inp.min = state.limit_min || 4000;
-    inp.max = state.limit_max || 400000;
-
-    const b = state.budget;
-    const now = $('#limitNow');
-    if (!b) {
-        now.replaceChildren(el('div', { class: 'small muted' },
-            '対象データを選ぶと、いまの使用量が出ます'
-            + '（チャット画面のサイドバーで選択してください）。'));
-        $('#limitBar').replaceChildren();
-        $('#modelBudget').replaceChildren();
+    const total = state.catalog_chars || 0;
+    const rows = state.contexts || [];
+    const label = { override: '登録した値', table: '公式の表', default: '推定' };
+    const box = $('#ctxTable');
+    if (!rows.length) {
+        box.replaceChildren(el('div', { class: 'small muted' }, '候補のモデルを選ぶと、ここに出ます。'));
         return;
     }
-
-    const limit = parseInt(inp.value || b.limit_chars, 10) || b.limit_chars;
-    const over = b.catalog_chars > limit;
-    now.replaceChildren(
-        el('div', { class: 'small' },
-            `全DBを選んだ場合のカタログ: ${fmt(b.catalog_chars)} 字`),
-        el('div', { class: `small ${over ? 'ctxwarn' : 'muted'}` },
-            over
-                ? `上限 ${fmt(limit)} 字を超えるので要約版になります（列名が渡りません）。`
-                : `上限 ${fmt(limit)} 字まで、あと ${fmt(limit - b.catalog_chars)} 字ぶん`
-                  + `説明を書き足せます。`));
-
-    // 入力された上限で計算し直す（サーバと同じ式。保存前に結果が見える）
-    const atLimitPct = (context) => {
-        const tok = b.base_tokens + limit * b.tokens_per_char;
-        return context ? Math.round(tok / context * 1000) / 10 : 0;
-    };
-    const atPct = atLimitPct(b.context);
-
-    // 既定モデルでの帯
-    $('#limitBar').replaceChildren(
+    box.replaceChildren(
         el('div', { class: 'small muted mb' },
-            `既定モデル ${b.model}（一度に読める量 ${fmt(b.context)} トークン`
-            + `${b.context_known ? '' : '・推定'}）に対して`),
-        bar(b.now_pct, atPct),
-        el('div', { class: `small ${atPct >= 70 ? 'ctxwarn' : 'muted'} mt` },
-            `いま ${b.now_pct}% を使用（残り ${b.headroom_pct}%）。`
-            + `上限まで育つと ${atPct}%。`
-            + (atPct >= 70
-                ? '会話の履歴に使える余地が少なくなります。上限を下げるか、'
-                  + '文脈の広いモデルを既定にしてください。'
-                : '残りは会話の履歴と回答に使われます。')));
+            `いまのカタログ全体: ${fmt(total)} 字。この量が「カタログの上限」以下のモデルなら、`
+            + '質問ごとの絞り込みなしで全DBがそのまま渡ります。'),
+        dataTable(['モデル', '一度に読める量', '出所', 'カタログの上限', 'いまのカタログ'],
+            rows.map(m => [
+                m.id,
+                `${fmt(m.context)} tok`,
+                label[m.source] || m.source,
+                `${fmt(m.limit_chars)} 字`,
+                m.fits ? '収まる（全部渡す）' : '超える（自動で絞る）',
+            ])),
+        ...(rows.some(m => m.source === 'default')
+            ? [el('div', { class: 'alert alert--warn small mt' },
+                '「推定」のモデルは表に無いため、既定値（'
+                + fmt(state.env_context_default || 128000) + ' tok）を仮に使っています。'
+                + '実際より大きい値だとカタログが溢れてエラーになるので、下の欄で登録してください。')]
+            : []));
 
-    // 候補モデルごとの比較（同じカタログでも、モデルによって余裕が全然違う）
-    const rows = (state.per_model || []).map(m => [
-        m.id + (m.context_known ? '' : '（推定）'),
-        `${fmt(m.context)} tok`,
-        `${m.now_pct}%`,
-        `${atLimitPct(m.context)}%`,
-        atLimitPct(m.context) >= 70 ? '⚠ 余裕が少ない' : '',
-    ]);
-    $('#modelBudget').replaceChildren(rows.length
-        ? el('div', {},
-            el('div', { class: 'small muted mb' }, 'モデルごとの見込み'),
-            dataTable(['モデル', '一度に読める量', 'いまの使用', '上限まで育つと', ''], rows))
-        : '');
+    // 登録済みの一覧（外せるように）
+    const ov = state.context_overrides || {};
+    const keys = Object.keys(ov);
+    if (keys.length) {
+        box.append(el('div', { class: 'small mt' }, el('b', {}, '登録済み: '),
+            ...keys.map(k => el('span', { class: 'chip', style: 'margin-right:6px' },
+                `${k} = ${fmt(ov[k])} tok`,
+                el('button', { class: 'chip__x', title: '外す', onclick: () => {
+                    delete state.context_overrides[k]; render();
+                } }, '×')))));
+    }
 }
 
 function addTo(key, input, normalize) {
@@ -253,7 +228,6 @@ function addTo(key, input, normalize) {
 
 async function load(refresh) {
     state = await api(`/api/models/admin${refresh ? '?refresh=1': '' }`, undefined, 'GET');
-    $('#inlineLimit').value = state.prompt_inline_limit || '';
     render();
 }
 
@@ -269,8 +243,18 @@ document.addEventListener('DOMContentLoaded', () => {
         $(i).addEventListener('keydown', ev => { if (ev.key === 'Enter') $(b).click(); }));
 
     $('#defaultModel').addEventListener('change', ev => { state.default = ev.target.value; });
-    // 入力しながら結果が見えるようにする（保存してから気づくのを防ぐ）
-    $('#inlineLimit').addEventListener('input', renderBudget);
+    // 表に無いモデルの文脈量を登録する（保存で確定）
+    $('#ctxAdd').addEventListener('click', () => {
+        const name = ($('#ctxName').value || '').trim().toLowerCase();
+        const n = parseInt(($('#ctxTokens').value || '').replace(/[,_]/g, ''), 10);
+        if (!name) return toast('モデル名を入れてください。', 'warn');
+        if (!n || n < 1000) return toast('文脈量はトークン数（1,000以上）で入れてください。', 'warn');
+        state.context_overrides = { ...(state.context_overrides || {}), [name]: n };
+        $('#ctxName').value = ''; $('#ctxTokens').value = '';
+        render();
+        toast('登録しました。「設定を保存」で確定します。', 'warn');
+    });
+    $('#ctxTokens').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('#ctxAdd').click(); });
 
     $('#refresh').addEventListener('click', async ev => {
         ev.target.disabled = true;
@@ -286,11 +270,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 models: state.models || [],
                 default: state.default,
                 vision: state.vision || [],
-                prompt_inline_limit: parseInt($('#inlineLimit').value || '0', 10)
-                                     || state.prompt_inline_limit,
+                context_overrides: state.context_overrides || {},
             });
             state = { ...state, ...r };
-            $('#inlineLimit').value = state.prompt_inline_limit;
             toast('保存しました。', 'ok');
             render();
         } catch (e) { toast(e.message, 'err', 9000); }

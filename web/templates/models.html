@@ -71,24 +71,33 @@
   </div>
 
   <div class="card">
-    <div class="card__title">AIに渡すデータカタログの量</div>
+    <div class="card__title">モデルが一度に読める量と、AIに渡すカタログの上限</div>
     <div class="card__desc">
-      データカタログ（テーブル・列の説明、コード値、サンプル行）は、
-      この文字数までなら<b>そのまま全部</b>AIに渡ります。超えるとテーブル名と説明だけの
-      要約に切り替わり、<b>列名が1つも渡らなくなります</b>。
-      「その列は無い」という誤答は、たいていこれが原因です。<br>
-      大きくすると1回の質問で読む量が増えますが、内容が変わらない限り
-      プロンプトキャッシュが効くため、2回目以降の速度と費用への影響はわずかです。
+      カタログ（テーブル・列の説明、コード値、サンプル行）をどこまで<b>そのまま</b>AIに渡すかは、
+      <b>選ばれたモデルの文脈量から自動で決まります</b>（文脈の半分をカタログに、残りを
+      会話の履歴と回答に使う配分）。設定する上限はありません。<br>
+      カタログ全体が上限に収まらないモデルでは、質問ごとに関係するDBだけへ自動で絞ります
+      （列名は失われません）。<br>
+      文脈量は OpenAI 公式リファレンスの値を持っています。<b>「推定」と出ているモデル</b>は
+      表に無いので、下の欄で正しいトークン数を登録してください（ゲートウェイ独自の名前や
+      他社モデルなど）。
     </div>
-    <div class="row" style="align-items:flex-end">
-      <div style="width:200px">
-        <label class="field">上限（文字数）</label>
-        <input type="number" id="inlineLimit" step="1000">
+    <div id="ctxTable" class="mt"></div>
+    <div class="row mt" style="align-items:flex-end;gap:8px">
+      <div style="width:260px">
+        <label class="field">文脈量を登録するモデル名</label>
+        <input type="text" id="ctxName" placeholder="例: my-gateway-model">
       </div>
-      <div class="grow" id="limitNow"></div>
+      <div style="width:160px">
+        <label class="field">文脈量（トークン）</label>
+        <input type="number" id="ctxTokens" step="1000" placeholder="例: 128000">
+      </div>
+      <button class="btn btn--sm" id="ctxAdd">登録</button>
     </div>
-    <div id="limitBar" class="mt"></div>
-    <div id="modelBudget" class="mt"></div>
+    <div class="small muted mt">
+      名前は部分一致です（<code>my-gateway</code> と登録すれば <code>my-gateway-model-v2</code> にも効きます）。
+      「設定を保存」で確定します。
+    </div>
   </div>
 
   <div class="row mb">

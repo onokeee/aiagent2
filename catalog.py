@@ -1002,10 +1002,11 @@ def inline_length(scope: list[dict]) -> int:
 
 
 def inline_limit() -> int:
-    """カタログを全文のまま入れる上限。「モデル設定」画面の値が最優先。
+    """カタログを全文のまま入れる上限の天井（モデルを知らない呼び出し向け）。
 
-    models は画面側の都合（設定ファイル）を持つので、下位のここからは
-    呼ぶときだけ参照する。読めなければ env の初期値に落とす。
+    実効値は選択中モデルの文脈量から自動で決まる（models.inline_limit_for）ので、
+    通常は prompt_for_scope に limit を渡す。ここはモデルが分からない場面の
+    フォールバック（天井値）。読めなければ env の初期値に落とす。
     """
     try:
         import models

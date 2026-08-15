@@ -224,24 +224,45 @@ PROFILE_STATS_MAX_ROWS = 2_000_000  # これ以上の行数のテーブルは列
 #
 # ここは初期値で、「モデル設定」画面で決めた値があればそちらが優先される
 # （models.prompt_inline_limit() を参照）。
+# ※ 現在は「選択中モデルの文脈量」から自動で決めるため、この値は使っていない。
+#   古い env との互換のために読むだけ（models.inline_limit_for を参照）。
 PROMPT_INLINE_LIMIT_CHARS = int(os.getenv("PROMPT_INLINE_LIMIT_CHARS", "80000") or 80000)
 
-# モデルが一度に読める量（トークン）。名前の前方一致で当てる（長い順に見る）。
-# ゲートウェイ側で独自の名前が付いていることがあるので、当たらなければ
-# MODEL_CONTEXT_DEFAULT を使い、画面には「推定」と出す。
+# モデルが一度に読める量（トークン）。OpenAI公式リファレンス（developers.openai.com/api/docs/models）
+# の Context window の値。名前の部分一致で当てる（長い名前から見る）ので、
+# "gpt-4o-mini-2024-07-18" のような日付つきスナップショットも "gpt-4o-mini" に当たる。
+#
+# ここに無いモデル（ゲートウェイ独自の名前や他社モデル）は MODEL_CONTEXT_DEFAULT を仮の値に
+# 使い、画面に「推定」と出す。正しい値は「モデル設定」画面で管理者が登録できる
+# （models.py の context_overrides）。ここは既定値であって上書きの土台。
 MODEL_CONTEXT_WINDOWS = {
+    # GPT-5.6（2026）
+    "gpt-5.6": 1_050_000,
+    # GPT-5 系（2025-08）: 400K。mini / nano も同じ
+    "gpt-5-mini": 400_000,
+    "gpt-5-nano": 400_000,
+    "gpt-5": 400_000,
+    # GPT-4.1 系（2025-04）: 1,047,576。mini / nano も同じ
+    "gpt-4.1-mini": 1_047_576,
+    "gpt-4.1-nano": 1_047_576,
     "gpt-4.1": 1_047_576,
+    # GPT-4o 系: 128K
+    "gpt-4o-mini": 128_000,
     "gpt-4o": 128_000,
+    "chatgpt-4o": 128_000,
+    # o シリーズ（推論）: 200K
+    "o4-mini": 200_000,
+    "o4": 200_000,
+    "o3-mini": 200_000,
+    "o3": 200_000,
+    "o1-mini": 128_000,
+    "o1": 200_000,
+    # 旧世代
     "gpt-4-turbo": 128_000,
     "gpt-4-32k": 32_768,
     "gpt-4": 8_192,
     "gpt-3.5-turbo-16k": 16_385,
     "gpt-3.5-turbo": 16_385,
-    "gpt-5": 400_000,
-    "o4": 200_000,
-    "o3": 200_000,
-    "o1": 200_000,
-    "chatgpt-4o": 128_000,
 }
 MODEL_CONTEXT_DEFAULT = int(os.getenv("MODEL_CONTEXT_DEFAULT", "128000") or 128000)
 

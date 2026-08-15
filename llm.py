@@ -328,10 +328,10 @@ def budget(scope: list[dict], model: str | None = None, admin: bool = False) -> 
 
     model = model or config.OPENAI_MODEL
     context, known = models_mod.context_window(model)
-    limit = models_mod.prompt_inline_limit()
+    limit = models_mod.inline_limit_for(model)      # そのモデルの自動上限
 
     # 推定せず、実際に組み立てたものを測る（カタログはキャッシュ済みなので速い）
-    system = build_system_prompt(scope, admin=admin)
+    system = build_system_prompt(scope, admin=admin, model=model)
     used_catalog = len(catalog.prompt_for_scope(scope))
     catalog_chars = catalog.inline_length(scope)       # 全文にした場合の長さ
     tool_chars = len(json.dumps(tools.build_tools(scope, admin=admin), ensure_ascii=False))

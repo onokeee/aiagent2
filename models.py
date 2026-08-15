@@ -32,7 +32,7 @@ _CACHE_SEC = 300
 # メール設定と同じ考え方で、env は「まだ画面で決めていないときの値」。
 # =============================================================================
 
-ADMIN_KEYS = ("models", "default", "vision", "prompt_inline_limit")
+ADMIN_KEYS = ("models", "default", "vision", "context_overrides")
 
 #: カタログのインライン上限として認める範囲。
 #: 下限は「1DBぶんの詳細（実測で平均5.3K字）が入る」ことを目安にした。
@@ -86,17 +86,13 @@ def is_vision(model: str) -> bool:
 
 
 def prompt_inline_limit() -> int:
-    """カタログをそのまま system prompt に入れる上限（文字数）。
+    """カタログをそのまま入れる量の天井（文字）。
 
-    「モデル設定」画面で決めた値が最優先。無ければ env（config）の初期値。
-    ここを超えると要約に落ち、AIに列名が渡らなくなる。
+    実効値はモデルの文脈から自動で決まる（inline_limit_for）。この天井は
+    「文脈が100万トークンあるモデルでも、カタログに割く量はここまで」という
+    安全弁で、画面から変えるものではない。
     """
-    raw = _read_admin().get("prompt_inline_limit")
-    try:
-        v = int(raw)
-    except (TypeError, ValueError):
-        return config.PROMPT_INLINE_LIMIT_CHARS
-    return max(INLINE_LIMIT_MIN, min(v, INLINE_LIMIT_MAX))
+    return INLINE_LIMIT_MAX
 
 
 #: モデルの文脈のうち、カタログに使ってよい割合。
@@ -104,20 +100,39 @@ def prompt_inline_limit() -> int:
 CATALOG_CONTEXT_RATIO = 0.5
 
 
-def inline_limit_for(model: str | None = None) -> int:
-    """実効のインライン上限（文字）。管理者の上限と、モデルの実力の小さい方。
+def context_overrides() -> dict:
+    """管理者が「モデル設定」画面で登録した文脈量 {モデル名(小文字): トークン}。
 
-    80,000字の固定値だと、文脈の小さいモデル（gpt-4 の8Kなど）を選んだときに
-    「入るはずが入らない」が起こる。モデルが一度に読める量から逆算した容量と、
-    管理者が画面で決めた上限（安全弁）の小さい方を採る。
+    公式の表（config.MODEL_CONTEXT_WINDOWS）に無いモデル — ゲートウェイ独自の名前や
+    他社モデル — の実力を教えるための口。表より優先する。
     """
-    base = prompt_inline_limit()
+    raw = _read_admin().get("context_overrides") or {}
+    out = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n > 0 and str(k).strip():
+            out[str(k).strip().lower()] = n
+    return out
+
+
+def inline_limit_for(model: str | None = None) -> int:
+    """カタログをそのまま入れる上限（文字）。選択中モデルの文脈量から自動で決める。
+
+        上限 = 文脈(トークン) × 0.5 ÷ 0.55(日本語1文字あたりの概算トークン)
+
+    文脈の半分をカタログに、残りをツール定義・履歴・回答に使う配分。
+    文脈量は 管理者の登録 > 公式の表 > 既定値 の順で決まる（context_window）。
+    天井（INLINE_LIMIT_MAX）と床（INLINE_LIMIT_MIN）で丸める。
+    """
     if not model:
-        return base
+        return prompt_inline_limit()
     import llm                     # 循環importを避ける（llm側もmodelsを遅延importしている）
     context, _ = context_window(model)
     capacity = int(context * CATALOG_CONTEXT_RATIO / llm.TOKENS_PER_CHAR_TEXT)
-    return max(INLINE_LIMIT_MIN, min(base, capacity))
+    return max(INLINE_LIMIT_MIN, min(prompt_inline_limit(), capacity))
 
 
 def catalog_total_chars() -> int:
@@ -136,6 +151,13 @@ def context_window(model: str) -> tuple:
     名前は環境によって違うので、前方一致の長い方から当てる。
     """
     low = str(model or "").lower()
+    # 管理者の登録（完全一致 → 部分一致）> 公式の表（長い名前から部分一致）> 既定値（推定）
+    ov = context_overrides()
+    if low in ov:
+        return ov[low], True
+    for key in sorted(ov, key=len, reverse=True):
+        if key and key in low:
+            return ov[key], True
     for key in sorted(config.MODEL_CONTEXT_WINDOWS, key=len, reverse=True):
         if key in low:
             return config.MODEL_CONTEXT_WINDOWS[key], True
@@ -315,10 +337,11 @@ def admin_status(refresh: bool = False, scope: list[dict] | None = None) -> dict
         "env_default": config.OPENAI_MODEL,
         "settings_file": str(config.MODEL_SETTINGS_FILE),
         "llm_ready": _llm_ready(),
-        "prompt_inline_limit": prompt_inline_limit(),
-        "prompt_inline_limit_env": config.PROMPT_INLINE_LIMIT_CHARS,
-        "limit_min": INLINE_LIMIT_MIN,
-        "limit_max": INLINE_LIMIT_MAX,
+        "context_overrides": context_overrides(),
+        "env_context_default": config.MODEL_CONTEXT_DEFAULT,
+        "catalog_chars": catalog_total_chars(),
+        # 候補ごとの文脈量とカタログ上限。出所も返す（登録 / 公式の表 / 推定）
+        "contexts": [_context_row(m) for m in names],
     }
     if scope is not None:
         import llm
@@ -334,6 +357,22 @@ def admin_status(refresh: bool = False, scope: list[dict] | None = None) -> dict
                 "at_limit_pct": round(base["at_limit_tokens"] / ctx * 100, 1) if ctx else 0.0,
             })
     return out
+
+
+def _context_row(model: str) -> dict:
+    """モデル設定画面の1行ぶん。文脈量がどこから来た値かも添える。"""
+    low = str(model or "").lower()
+    ov = context_overrides()
+    if low in ov or any(k in low for k in ov):
+        source = "override"
+    elif any(k in low for k in config.MODEL_CONTEXT_WINDOWS):
+        source = "table"
+    else:
+        source = "default"
+    ctx, _ = context_window(model)
+    limit = inline_limit_for(model)
+    return {"id": model, "context": ctx, "source": source, "limit_chars": limit,
+            "fits": catalog_total_chars() <= limit}
 
 
 def _llm_ready() -> bool:
@@ -358,18 +397,23 @@ def save_admin(data: dict, user: str | None = None) -> dict:
 
     vision = [str(v).strip().lower() for v in (data.get("vision") or []) if str(v).strip()]
 
-    limit = data.get("prompt_inline_limit", prompt_inline_limit())
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        raise ValueError("カタログの上限は数字で指定してください。") from None
-    if not (INLINE_LIMIT_MIN <= limit <= INLINE_LIMIT_MAX):
-        raise ValueError(f"カタログの上限は {INLINE_LIMIT_MIN:,}〜{INLINE_LIMIT_MAX:,} 字の"
-                         f"範囲で指定してください（いま {limit:,}）。")
+    # 文脈量の登録 {モデル名: トークン}。表に無いモデルの実力を教える口
+    overrides = {}
+    for k, v in (data.get("context_overrides") or {}).items():
+        name = str(k).strip().lower()
+        if not name:
+            continue
+        try:
+            n = int(str(v).replace(",", "").replace("_", ""))
+        except (TypeError, ValueError):
+            raise ValueError(f"「{k}」の文脈量は数字（トークン数）で指定してください。") from None
+        if n < 1_000 or n > 10_000_000:
+            raise ValueError(f"「{k}」の文脈量 {n:,} は範囲外です（1,000〜10,000,000）。")
+        overrides[name] = n
 
     _write_admin({"models": models, "default": default, "vision": vision,
-                  "prompt_inline_limit": limit})
+                  "context_overrides": overrides})
     print(f"[models] モデル設定を更新しました（{user or '不明'}）: "
           f"候補{len(models)}件 / 既定={default} / 画像判定={len(vision)}件 / "
-          f"カタログ上限={limit:,}字")
+          f"文脈量の登録={len(overrides)}件")
     return admin_status()

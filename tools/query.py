@@ -15,6 +15,17 @@ from .common import _err, _json, _report_result, _total_rows, fetch, source_note
 from .schemas import _CHART_TOOLS
 
 
+def _example_exists(sql: str) -> bool:
+    """このSQLと同じ例文がどこかのDBに登録済みか。"""
+    if not sql.strip():
+        return False
+    import db as dbmod
+    for f in dbmod.list_db_files():
+        if catalog.find_example(catalog.load_meta(f).get("examples") or [], sql):
+            return True
+    return False
+
+
 def _run_sql_query(args: dict, scope: list[dict]) -> dict:
     try:
         columns, rows, truncated, rid, total = fetch(args, scope,
@@ -36,6 +47,9 @@ def _run_sql_query(args: dict, scope: list[dict]) -> dict:
                  if len(rows) > len(sample) else
                  f"この結果は result_id '{rid}' で他のツールから使い回せます。"),
         **source_note(len(rows), truncated, total),
+        # AIが「例文に登録しますか？」と聞くべきかの手がかり。
+        # 既に同じSQLの例文があれば聞かない（同じ提案の繰り返しは邪魔になる）。
+        "example_registered": _example_exists(str(args.get("sql") or "")),
     })
     return {
         "ok": True,

@@ -986,7 +986,6 @@ def save_example():
     others = [s["name"] for s in hits[1:]]
     message = f"{p.name} の例文に追加しました。"
     if others:
-        # DBをまたぐ例文は、チャットで両方を選んでいないと再現しない
-        message += (f"（{'、'.join(others)} も参照しています。"
-                    "使うときはこれらのDBも一緒に選んでください）")
+        # DBをまたぐ例文は、質問時に相手DBも対象になったときだけ効く（自動判定）
+        message += f"（{'、'.join(others)} も参照する例文です）"
     return jsonify({"ok": True, "added": True, "message": message})

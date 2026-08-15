@@ -258,7 +258,6 @@ function wireManage() {
     // DB情報を開いたときにサイズ・削除ボタンを出す
     $('#dbInfo')?.addEventListener('toggle', ev => { if (ev.target.open) loadManage(); });
     // 定期取り込みの全体状態は開いてすぐ見えるようにする
-    $('#refreshTables')?.addEventListener('click', () => loadManage(true));
     $('#runDue')?.addEventListener('click', async ev => {
         ev.target.disabled = true;
         try {

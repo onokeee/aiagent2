@@ -292,6 +292,44 @@ function openErModal(item) {
     }, true);
 }
 
+/* 用語の登録カード。AIは提案まで。書き込みはこのボタン（管理者）だけ。 */
+function glossaryCard(item) {
+    const where = item.table ? `${item.db} の ${item.table}` : `${item.db}（DB全体）`;
+    const card = el('div', { class: 'mailcard' });
+    const row = (label, value) => value ? el('div', { class: 'mailcard__row' },
+        el('span', { class: 'mailcard__label' }, label),
+        el('span', { class: 'grow' }, value)) : null;
+
+    card.append(el('div', { class: 'mailcard__head' },
+        icon('catalog', 'icon--sm'), el('b', {}, '用語集への登録の提案'),
+        el('div', { class: 'spacer' }),
+        item.exists ? el('span', { class: 'badge badge--warn' }, '既存の定義を上書き') : null));
+    card.append(
+        row('用語', item.term),
+        row('説明', item.description),
+        item.sql ? el('div', { class: 'mailcard__row' },
+            el('span', { class: 'mailcard__label' }, 'SQL式'),
+            el('code', { class: 'grow mono' }, item.sql)) : null,
+        row('置き場所', where),
+        item.verdict ? row('検証', `${item.verdict}: ${item.detail || ''}`) : null);
+
+    const btn = el('button', { class: 'btn btn--primary btn--sm', onclick: async () => {
+        btn.disabled = true;
+        try {
+            const r = await api('/api/chat/glossary-save', {
+                db: item.db, table: item.table, term: item.term,
+                description: item.description, sql: item.sql });
+            toast(r.message, 'ok', 8000);
+            btn.textContent = '登録済み';
+        } catch (e) { toast(e.message, 'err', 8000); btn.disabled = false; }
+    } }, '用語集に登録');
+    card.append(el('div', { class: 'mailcard__row', style: 'justify-content:flex-end' },
+        el('span', { class: 'small muted grow' },
+            '登録すると全員のAIがこの定義に従います。内容を確かめてから押してください。'),
+        btn));
+    return card;
+}
+
 function addItem(item) {
     const body = slot(item.role === 'user' ? 'user' : 'assistant');
     if (item.kind === 'text' && item.role === 'user' && item.turn !== undefined) {
@@ -358,6 +396,8 @@ function addItem(item) {
                 el('summary', {}, `「${s.name}」の内容を確認（先頭${s.rows.length}行）`),
                 el('div', { class: 'acc__body' }, dataTable(s.columns, s.rows))));
         });
+    } else if (item.kind === 'glossary_term') {
+        body.append(glossaryCard(item));
     } else if (item.kind === 'er') {
         body.append(erCard(item));
     } else if (item.kind === 'report') {

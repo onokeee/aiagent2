@@ -1314,6 +1314,42 @@ BUILTIN_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "propose_glossary_term",
+            "description": (
+                "業務用語をデータカタログの用語集に登録する「登録カード」をチャットに出す。"
+                "実際に登録するかはユーザーがカードのボタンで決める（勝手には登録されない）。"
+                "\n使いどころ:"
+                "\n- ユーザーが言葉の定義を教えてくれたとき"
+                "（「有効な受注とはキャンセル以外のこと」など）"
+                "\n- あいまいな用語をあなたが解釈し、その解釈をユーザーが認めたとき"
+                "\n- 同じ言葉の意味を何度も聞き直していると気づいたとき"
+                "\nまず「この定義で用語集に登録しますか？」と一言確認し、"
+                "前向きな返事があったらこのツールでカードを出す。"
+                "会話のたびに毎回は出さない（うるさくなる）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string", "description": "用語（例: 有効な受注）。"},
+                    "description": {"type": "string",
+                                    "description": "日本語の定義。ユーザーの言い回しを活かす。"},
+                    "sql": {"type": "string",
+                            "description": "SQLの条件式・計算式（任意）。"
+                                           "例: orders.status != '9' AND orders.kbn = '1'。"
+                                           "会話で実際に使って正しかった式を入れる。"},
+                    "table": {"type": "string",
+                              "description": "用語を置くテーブル。その用語が主に関わるテーブル名。"
+                                             "複数テーブルにまたがる用語のときは省略し db を指定。"},
+                    "db": {"type": "string",
+                           "description": "DB全体の用語にするときのDBファイル名（例: demo_sales.db）。"},
+                },
+                "required": ["term", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "show_er_diagram",
             "description": (
                 "DBのER図（テーブル同士の関係図）をチャット画面に表示する。"

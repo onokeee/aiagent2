@@ -253,6 +253,96 @@ def _analyze_stats(args: dict, scope: list[dict]) -> dict:
     }
 
 
+def _propose_glossary_term(args: dict, scope: list[dict]) -> dict:
+    """業務用語の登録カードをチャットに出す（提案まで。保存は人がボタンで確定）。
+
+    メールと同じ型: 作るのはAI、確定するのは人。カタログは全員共通の土台なので、
+    会話の「はい」だけで書き換えず、カードのボタンという明示の操作を挟む。
+    SQL式があれば実データで確かめてから見せる（通らない式を提案しない）。
+    """
+    import db as dbmod
+
+    term = str(args.get("term") or "").strip()
+    desc = str(args.get("description") or "").strip()
+    sql = str(args.get("sql") or "").strip()
+    table = str(args.get("table") or "").strip()
+    if not term or not desc:
+        return _err("term（用語）と description（説明）は必須です。")
+
+    # 置き場のDBを決める。table を持つDBを探す（複数あれば db で指定させる）
+    name = str(args.get("db") or "").strip()
+    files = dbmod.list_db_files()
+    target = None
+    if name:
+        low = name.lower()
+        target = next((f for f in files
+                       if low in (f.name.lower(), f.stem.lower(),
+                                  dbmod.alias_for(f).lower())), None)
+        if target is None:
+            return _err(f"DB '{name}' が見つかりません。")
+    elif table:
+        owners = [f for f in files
+                  if table in (catalog.profile_db(f).get("tables") or {})]
+        if len(owners) == 1:
+            target = owners[0]
+        elif not owners:
+            return _err(f"テーブル '{table}' を持つDBが見つかりません。")
+        else:
+            return _err(f"テーブル '{table}' は複数のDBにあります。"
+                        "db でどのDBか指定してください: "
+                        + "、".join(f.name for f in owners))
+    else:
+        return _err("table（用語を置くテーブル）か db を指定してください。")
+
+    alias = dbmod.alias_for(target)
+    if table and table not in (catalog.profile_db(target).get("tables") or {}):
+        return _err(f"{target.name} にテーブル '{table}' がありません。")
+
+    # SQL式の検証。条件式→該当件数 / 計算式→計算例 / 通らない→エラーで差し戻し
+    verdict, detail = "", ""
+    if sql:
+        ref = f"{alias}.{table}" if table else None
+        wide = dbmod.widen_scope(f"{alias}. {sql}", [
+            {"path": str(target), "alias": alias, "name": target.name, "tables": None}])
+        wide = dbmod.widen_scope(sql, wide)
+        try:
+            if ref:
+                _, rows, _ = dbmod.run_select(
+                    f"SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM {ref}) AS t "
+                    f"FROM {ref} WHERE {sql}", wide, max_rows=1)
+                n, t = rows[0]
+                verdict = "条件式"
+                detail = f"該当 {n:,} 行 / 全 {t:,} 行"
+            else:
+                _, rows, _ = dbmod.run_select(f"SELECT {sql} AS v", wide, max_rows=1)
+                verdict, detail = "計算式", f"計算結果: {rows[0][0]}"
+        except Exception:
+            try:
+                src = ref or f"{alias}.{(list(catalog.profile_db(target)['tables']) or [''])[0]}"
+                _, rows, _ = dbmod.run_select(f"SELECT {sql} AS v FROM {src}",
+                                              wide, max_rows=1)
+                verdict, detail = "計算式", f"計算結果の例: {rows[0][0]}"
+            except Exception as e:
+                return _err(f"SQL式が実データで通りませんでした: {str(e).splitlines()[0][:120]} "
+                            "式を直して提案し直すか、SQL式なし（説明だけ）で提案してください。")
+
+    exists = term in catalog.table_glossary(catalog.load_meta(target), table) if table         else term in catalog.db_glossary(catalog.load_meta(target))
+    return {
+        "ok": True,
+        "llm_content": _json({
+            "status": "proposed", "db": target.name, "table": table or "(DB全体)",
+            "term": term, "verdict": verdict or "説明のみ", "detail": detail,
+            "already_exists": exists,
+            "note": "登録カードをユーザーの画面に出しました。登録するかはユーザーが"
+                    "カードのボタンで決めます。あなたはこれ以上の操作をしなくてよい。",
+        }),
+        "render": {"role": "assistant", "kind": "glossary_term",
+                   "db": target.name, "table": table, "term": term,
+                   "description": desc, "sql": sql,
+                   "verdict": verdict, "detail": detail, "exists": exists},
+    }
+
+
 def _show_er_diagram(args: dict, scope: list[dict]) -> dict:
     """ER図をチャットに出す（読み取り専用）。
 
@@ -462,6 +552,7 @@ HANDLERS = {
     "run_sql_query": _run_sql_query,
     "describe_table": _describe_table,
     "show_er_diagram": _show_er_diagram,
+    "propose_glossary_term": _propose_glossary_term,
     "pivot_table": _pivot_table,
     "analyze_stats": _analyze_stats,
     "plot_chart": _plot_chart,
@@ -472,6 +563,10 @@ HANDLERS = {
     "export_csv": _export_csv,
     "export_text": _export_text,
 }
+
+# カタログへの書き込みを提案するツール。保存の確定ボタンは管理者にしか
+# 効かない(⭐例文保存と同じ)ので、ツール自体も管理者にだけ渡す。
+ADMIN_TOOLS = {"propose_glossary_term"}
 
 # SQLを受け取るツール（実行前プレビュー表示の対象）
 SQL_TOOLS = {"run_sql_query", "plot_chart", "plot_dual_axis", "pivot_table",

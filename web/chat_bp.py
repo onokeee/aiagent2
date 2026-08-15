@@ -64,6 +64,7 @@ TOOL_LABELS = {
     "find_mail_recipients": "宛先の検索",
     "compose_email": "メールの下書き",
     "analyze_usage": "利用状況の分析",
+    "propose_glossary_term": "用語登録の提案",
 }
 
 
@@ -874,6 +875,47 @@ def mail_send():
 def mail_test():
     """SMTPの疎通確認だけ（メールは送らない）。"""
     return jsonify(mailer.test_connection())
+
+
+@bp.post("/api/chat/glossary-save")
+@admin_required
+def glossary_save():
+    """チャットの登録カードから、用語をカタログの用語集へ保存する。
+
+    AIは propose_glossary_term でカードを出すところまで。書き込みはこの
+    エンドポイントだけで、押したのが管理者であることが唯一の前提
+    （カタログを書き換えるので ⭐例文保存と同じ扱い）。
+    """
+    body = request.json or {}
+    term = (body.get("term") or "").strip()
+    desc = (body.get("description") or "").strip()
+    sql = (body.get("sql") or "").strip()
+    table = (body.get("table") or "").strip()
+    if not term or not desc:
+        return jsonify({"error": "用語と説明が必要です。"}), 400
+    try:
+        path = db.path_for(body.get("db") or "")
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 400
+
+    meta = catalog.load_meta(path)
+    entry = {"description": desc, "sql": sql}
+    if table:
+        gl = catalog.table_glossary(meta, table)      # 既存の用語を消さずに足す
+        replaced = term in gl
+        gl[term] = entry
+        catalog.set_table_glossary(meta, table, gl)
+    else:
+        gl = catalog.db_glossary(meta)
+        replaced = term in gl
+        gl[term] = entry
+        meta["glossary"] = gl
+    catalog.save_meta(path, meta)
+    where = f"{path.name} の {table}" if table else f"{path.name}（DB全体）"
+    return jsonify({"ok": True,
+                    "message": f"「{term}」を {where} の用語集に"
+                               f"{'上書き登録' if replaced else '登録'}しました。"
+                               "次の質問からAIがこの定義に従います。"})
 
 
 @bp.post("/api/chat/save-example")

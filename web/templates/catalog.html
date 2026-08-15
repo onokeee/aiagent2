@@ -166,7 +166,8 @@
   <div class="tabpane" id="pane-er">
     <div class="er" id="erRoot">
       <div class="er__toolbar">
-        <button class="btn btn--sm" id="erUndo" disabled>元に戻す</button>
+        <button class="btn btn--sm hastip" id="erUndo" disabled
+                data-tip="テーブルを動かした操作を1手ずつ取り消します（最大20手）。&#10;関連の追加・削除や主キーはサーバに保存済みなので、ここでは戻りません（つなぎ直す／押し直すで戻せます）。">元に戻す</button>
         <button class="btn btn--sm" id="erSave">配置を保存</button>
         <button class="btn btn--sm" id="erFit">全体を表示</button>
         <button class="btn btn--sm" id="erFull">全画面</button>

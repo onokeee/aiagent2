@@ -459,7 +459,6 @@ const ER = (() => {
                     onclick: async () => {
                         const cols = [...panel.querySelectorAll('[data-pk]')]
                             .filter(c => c.checked).map(c => c.dataset.pk);
-                        pushUndo();
                         const r = await api('/api/catalog/primary-key',
                             { db: CAT.db, table: n.table, columns: cols });
                         data = r.er; render(); closePanel(); toast('主キーを保存しました。');
@@ -472,9 +471,10 @@ const ER = (() => {
     /* --- 変更（サーバに保存して描き直す） ---------------------------------------- */
 
     function pushUndo() {
-        undoStack.push(JSON.parse(JSON.stringify({ nodes: data.nodes, edges: data.edges })));
+        undoStack.push({ nodes: data.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })) });
         if (undoStack.length > 20) undoStack.shift();
-        $('#erUndo').disabled = false;
+        const b = $('#erUndo');
+        if (b) b.disabled = false;
     }
 
     /** サーバから返ってきた図を反映する。画面上の位置は動かさない
@@ -488,7 +488,8 @@ const ER = (() => {
 
     async function mutate(body, silent) {
         try {
-            if (!silent) pushUndo();
+            // 関連の変更はサーバに保存されるので「元に戻す」（配置の取り消し）の対象外。
+            // 消した関連はもう一度つなぎ直す、多重度は押し直す、で戻す。
             const r = await api('/api/catalog/relationship', { db: CAT.db, ...body });
             applyEr(r.er); closePanel();
         } catch (e) { toast(e.message, 'err'); }
@@ -505,6 +506,8 @@ const ER = (() => {
                 const sx = ev.clientX, sy = ev.clientY, ox = node.x, oy = node.y;
                 let moved = false;
                 const move = e2 => {
+                    // 動かし始めた瞬間に元の位置を積む（クリックだけなら積まない）
+                    if (!moved) pushUndo();
                     node.x = ox + (e2.clientX - sx) / view.k;
                     node.y = oy + (e2.clientY - sy) / view.k;
                     box.style.left = `${node.x}px`; box.style.top = `${node.y}px`;
@@ -712,16 +715,18 @@ const ER = (() => {
         toast('配置を保存しました。');
     }
 
+    /* 「元に戻す」は配置（テーブルの位置）だけを1手ずつ戻す。
+       関連の追加・削除・多重度・主キーはサーバに保存済みなので、ここでは戻さない。 */
     function undo() {
         const prev = undoStack.pop();
         if (!prev) return;
-        $('#erUndo').disabled = !undoStack.length;
-        // 座標だけを戻す。関連そのものの取り消しはサーバ側の状態なので再取得で合わせる
         prev.nodes.forEach(p => {
             const n = data.nodes.find(x => x.id === p.id);
             if (n) { n.x = p.x; n.y = p.y; }
         });
         render();
+        const b = $('#erUndo');
+        if (b) b.disabled = !undoStack.length;
     }
 
     function init(opts) {

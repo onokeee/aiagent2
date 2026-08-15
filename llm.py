@@ -534,7 +534,8 @@ _TOOL_SYSTEM = """あなたはSQLiteに詳しいデータ分析アプリの設�
   "description": "このツールが何を返すかの説明。AIがこれを読んで使うかどうかを決める",
   "sql": "SELECT ...（1文だけ。末尾のセミコロンは不要）",
   "parameters": [
-    {"name": "year", "type": "string", "description": "対象年 YYYY", "required": true}
+    {"name": "year", "type": "string", "description": "対象年 YYYY",
+     "required": true, "example": "2026"}
   ],
   "chart": {"chart_type": "line", "x": "月", "y": "売上", "title": "月別売上"}
 }
@@ -542,9 +543,15 @@ _TOOL_SYSTEM = """あなたはSQLiteに詳しいデータ分析アプリの設�
 守ること:
 - SQLは SELECT（または WITH ... SELECT）だけ。書き込み・DDLは書かない。
 - 列名・テーブル名は、与えられたカタログに実在するものだけを使う。推測で作らない。
-- 利用者が「毎回変えたい」と書いた項目は parameters にし、SQLでは :名前 の形で参照する。
-  それ以外の値はSQLに直接書いてよい。parameters が要らないなら空の配列にする。
+- 「毎回変えたい値」は、利用者の日本語から自分で見極めて parameters にする。
+  聞かれ方が変わるたびに差し替える値（「指定した年の」「ある部署の」「任意の期間で」など）は
+  パラメータにし、SQLでは :名前 の形で参照する。
+  一方「部署ごと」「月別」のような集計の切り口は、パラメータではなく GROUP BY で表す。
+  迷ったらパラメータにしない。引数が増えるほどAIは呼びにくくなる。
 - parameters の type は string / integer / number / boolean のいずれか。
+- parameters には description（日本語）と example を必ず書く。
+  example は「カタログの実値・期間に実在し、実際に行が返る値」にする。
+  この値で試し実行して見せるので、0行になる値を書かないこと。
 - 複数のDBにまたがるときは「DB名.テーブル名」で修飾する。
 - 列には日本語の別名を AS で付ける（画面にそのまま出るため）。
 - SQLiteに無い関数(STDDEV, MEDIAN, PERCENTILE_CONT, SQRT, POWER)やPIVOT構文は使わない。
@@ -557,8 +564,10 @@ def draft_tool(db_path, purpose: str, params_wanted: list[str] | None = None,
                error: str | None = None) -> dict:
     """日本語の「やりたいこと」から、ユーザー定義ツールの下書きを起こす。
 
-    purpose        … 何をするツールか（日本語）
-    params_wanted  … 毎回変えたい項目の日本語ラベル（例: ["対象年", "部署"]）
+    purpose        … 何をするツールか（日本語）。毎回変えたい値もこの文から読み取らせる
+                     ので、呼び出し側が指定を組み立てる必要はない。
+    params_wanted  … 毎回変えたい項目を明示したいときだけ渡す（例: ["対象年", "部署"]）。
+                     省略すれば purpose の書き方からAIが判断する。
     render         … 結果の見せ方（table / chart / chart_dual / excel / csv / none）
     previous/error … 前回の下書きが実データで失敗したときの、SQLとエラー文。
                      渡すと「どこが間違っていたか」を踏まえて書き直す。
@@ -604,12 +613,16 @@ def draft_tool(db_path, purpose: str, params_wanted: list[str] | None = None,
         if not isinstance(p, dict) or not str(p.get("name") or "").strip():
             continue
         t = str(p.get("type") or "string")
-        out["parameters"].append({
+        item = {
             "name": str(p["name"]).strip(),
             "type": t if t in custom_tools.PARAM_TYPES else "string",
             "description": str(p.get("description") or "").strip(),
             "required": p.get("required", True) is not False,
-        })
+        }
+        # 試し実行に使う値。空のまま流すと0行になり、動くかどうか確かめられない。
+        if p.get("example") not in (None, ""):
+            item["example"] = p["example"]
+        out["parameters"].append(item)
     if render in ("chart", "chart_dual") and isinstance(data.get("chart"), dict):
         out["chart"] = data["chart"]
     return out

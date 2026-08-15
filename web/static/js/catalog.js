@@ -1456,26 +1456,8 @@ function openToolWizard(seed) {
     const close = () => back.remove();
     back.addEventListener('click', ev => { if (ev.target === back) close(); });
 
-    const purpose = el('textarea', { rows: '2', style: 'width:100%',
-        placeholder: '例: 部署ごとの残業時間を月別に出す' }, seed?.purpose || '');
-    const paramBox = el('div', { class: 'row', style: 'gap:6px;flex-wrap:wrap' });
-    const paramInput = el('input', { type: 'text', style: 'max-width:200px',
-                                     placeholder: '例: 対象年' });
-    const wanted = [];
-    const drawChips = () => paramBox.replaceChildren(...wanted.map((w, i) =>
-        el('span', { class: 'chip' }, w,
-            el('button', { class: 'chip__x', onclick: () => { wanted.splice(i, 1); drawChips(); } }, '×'))));
-    const addParam = () => {
-        const v = paramInput.value.trim();
-        if (!v || wanted.includes(v)) return;
-        wanted.push(v); paramInput.value = ''; drawChips();
-    };
-    paramInput.addEventListener('keydown', ev => {
-        if (ev.key === 'Enter') { ev.preventDefault(); addParam(); }
-    });
-
-    const render = el('select', { style: 'width:auto' }, RENDER_KINDS.map(([k, label]) =>
-        el('option', { value: k, ...(k === (seed?.render || 'table') ? { selected: 'selected' } : {}) }, label)));
+    const purpose = el('textarea', { rows: '3', style: 'width:100%',
+        placeholder: '例: 指定した年の月別売上を、部署ごとに出す' }, seed?.purpose || '');
 
     const out = el('div', { class: 'mt' });
     let drafted = null;
@@ -1497,17 +1479,27 @@ function openToolWizard(seed) {
             'AIがSQLを起こして、実際のデータで確かめています…'));
         try {
             const res = await api('/api/catalog/tool/draft', {
-                db: CAT.db, purpose: text, params: wanted, render: render.value });
+                db: CAT.db, purpose: text, render: 'table' });
             drafted = res.tool;
             out.replaceChildren();
             if (!res.ok) {
                 out.append(el('div', { class: 'alert alert--err small' },
                     'うまく作れませんでした: ' + (res.error || '原因不明')
-                    + '　やりたいことをもう少し具体的に書くか、下の「詳しい設定」でSQLを直してください。'));
+                    + '　やりたいことをもう少し具体的に書き直して、もう一度お試しください。'));
             } else {
                 out.append(el('div', { class: 'alert alert--ok small' },
-                    `できました。実際のデータで動かした結果です（${res.attempts}回目で成功）。`));
+                    'できました。下の内容で作ります。'));
+                // 何ができたかを先に見せる。SQLを読めなくても、決まった内容と
+                // 実際に出た行を見れば「これでいい」と判断できる。
+                out.append(draftSummary(drafted));
+                out.append(el('div', { class: 'small muted mt' },
+                    '実際のデータで動かした結果（先頭のみ）:'));
                 out.append(resultTable({ ok: true, columns: res.columns, rows: res.rows }));
+                if (!(res.rows || []).length) {
+                    out.append(el('div', { class: 'alert alert--warn small mt' },
+                        '動きましたが0行でした。条件が厳しいだけかもしれません。'
+                        + '中身を確かめてから保存してください。'));
+                }
                 saveBtn.disabled = false;
             }
             // 起こした中身は必ず見せる。保存前に人が直せるようにする
@@ -1518,21 +1510,36 @@ function openToolWizard(seed) {
         makeBtn.disabled = false;
     } }, 'AIに作ってもらう');
 
-    /* 起こした中身（名前・説明・SQL）を見せて、その場で直せるようにする。 */
+    /* AIが決めたことを、SQLを読まなくても確かめられる形で見せる。 */
+    function draftSummary(t) {
+        const ps = t.parameters || [];
+        return el('div', { class: 'card mt', style: 'padding:10px 12px' },
+            el('div', { class: 'small' },
+                el('b', {}, 'このツールがすること: '), t.description || ''),
+            ps.length
+                ? el('div', { class: 'small mt' },
+                    el('b', {}, '毎回変えられる値: '),
+                    ps.map(p => `${p.description || p.name}`).join('、'),
+                    el('div', { class: 'small muted', style: 'margin-top:2px' },
+                        '下の結果は ' + ps.map(p =>
+                            `${p.description || p.name}=「${p.example ?? ''}」`).join('、')
+                        + ' で試した結果です。AIが呼ぶときは質問に合わせて値を入れます。'))
+                : el('div', { class: 'small muted mt' },
+                    '毎回変える値はありません（いつも同じ条件で返します）。'));
+    }
+
+    /* 起こした中身をその場で直せるようにする。ふつうは開かなくてよい。 */
     function draftDetail(t, retryInto) {
         const sql = el('textarea', { class: 'mono', rows: '6', style: 'width:100%' }, t.sql || '');
         const desc = el('input', { type: 'text', style: 'width:100%', value: t.description || '' });
         sql.addEventListener('input', () => { drafted.sql = sql.value; });
         desc.addEventListener('input', () => { drafted.description = desc.value; });
         return el('details', { class: 'mt', ...(retryInto ? { open: 'open' } : {}) },
-            el('summary', { class: 'small muted', style: 'cursor:pointer' }, '詳しい設定（説明・SQL・パラメータ）'),
+            el('summary', { class: 'small muted', style: 'cursor:pointer' },
+                '中身を見る・直す（ふつうは不要）'),
             el('div', { class: 'mt' },
                 el('label', { class: 'field' }, 'AIに渡す説明'), desc,
                 el('label', { class: 'field mt' }, 'SQL'), sql,
-                (t.parameters || []).length
-                    ? el('div', { class: 'small muted mt' },
-                        'パラメータ: ' + t.parameters.map(p => `${p.name}（${p.description || p.type}）`).join('、'))
-                    : el('div', { class: 'small muted mt' }, 'パラメータはありません。'),
                 el('div', { class: 'row mt' },
                     el('button', { class: 'btn btn--sm', onclick: async ev => {
                         const res = await tryTool(drafted, ev.target, retryBox);
@@ -1548,26 +1555,14 @@ function openToolWizard(seed) {
             el('button', { class: 'btn btn--sm btn--ghost', onclick: close }, icon('x', 'icon--sm'))),
         el('div', { class: 'modal__body', style: 'padding:12px 14px' },
             el('div', { class: 'small muted mb' },
-                'SQLは書かなくてかまいません。やりたいことを日本語で書くと、'
-                + 'AIがSQLを組み立てて、実際のデータで動くところまで確かめます。'),
+                'やりたいことを日本語で書くだけです。SQLも設定も要りません。'
+                + 'AIがSQLを組み立て、毎回変える値があればそれも自分で見つけ、'
+                + '実際のデータで動くところまで確かめてから作ります。'),
             el('label', { class: 'field' }, 'このツールは何をする？'),
             purpose,
-            el('label', { class: 'field mt' }, '毎回変えたいところ（任意）'),
-            el('div', { class: 'row', style: 'gap:6px' }, paramInput,
-                el('button', { class: 'btn btn--sm', onclick: addParam }, '＋ 追加')),
             el('div', { class: 'small muted', style: 'margin-top:4px' },
-                '「対象年」「部署」など。指定するとAIが呼ぶときに値を入れてくれます。'),
-            paramBox,
-            // 見せ方はふつう決めなくてよい。表で返しておけば、AIが必要に応じて
-            // グラフ用のツールに渡す。「いつも必ずグラフで出したい」ときだけ変える。
-            el('details', { class: 'mt' },
-                el('summary', { class: 'small muted', style: 'cursor:pointer' },
-                    '結果の見せ方を決める（ふつうは不要）'),
-                el('div', { class: 'mt' }, render,
-                    el('div', { class: 'small muted mt' },
-                        '既定の「表」で作っておけば、あとから「グラフにして」「Excelにして」'
-                        + 'と言われたときに、AIがこの結果をそのツールに渡します。'
-                        + 'いつも必ず同じ形で出したいときだけ変えてください。'))),
+                '例:「指定した年の月別売上を出す」「ある部署の残業時間の多い順に社員を並べる」。'
+                + '「指定した」「ある〇〇の」と書けば、そこが毎回変えられる値になります。'),
             el('div', { class: 'row mt' }, el('div', { class: 'spacer' }), makeBtn),
             out),
         el('div', { class: 'modal__foot row', style: 'align-items:center' },
@@ -1617,7 +1612,6 @@ function wireTools() {
     const list = $('#toolList');
     list.replaceChildren(...CAT.custom.map(toolCard));
     if (!CAT.custom.length) list.append(el('div', { class: 'small muted' }, 'まだありません。'));
-    $('#toolAdd').addEventListener('click', () => list.append(toolCard(null)));
     $('#toolWizard')?.addEventListener('click', () => openToolWizard(null));
 
     renderBuiltins();

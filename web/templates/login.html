@@ -13,7 +13,6 @@
     <div class="brand">
       {{ icon('spark') }}
       <h1>{{ app_title }}</h1>
-      <div class="muted small">ログインすると、あなた専用のデータカタログとチャット履歴が使えます。</div>
     </div>
 
     {% if fatal %}
@@ -22,7 +21,6 @@
       {% for category, message in get_flashed_messages(with_categories=true) %}
         <div class="alert alert--{{ 'err' if category == 'error' else category }}">{{ message }}</div>
       {% endfor %}
-      {% if hint %}<div class="alert alert--info">{{ hint }}</div>{% endif %}
 
       <div class="card">
         <form method="post">

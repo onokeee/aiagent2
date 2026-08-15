@@ -98,6 +98,29 @@ def classify_error(message: str) -> tuple[str, str]:
 # 材料集め
 # =============================================================================
 
+def _asked(log: list, fallback: datetime | None) -> list[dict]:
+    """1発言ぶんの記録。質問の時刻と、答え終わった時刻を組にする。
+
+    表示物には at が入っている（質問は積んだ時刻、応答は保存した時刻）。
+    この2つの差が、その質問で待たされた時間になる。
+    at を持たない古い会話は、会話の開始時刻で代用する。
+    """
+    out: list[dict] = []
+    for item in log:
+        at = _dt(item.get("at")) or fallback
+        if item.get("role") == "user" and item.get("kind") == "text":
+            out.append({"at": at, "text": str(item.get("content") or "").strip(),
+                        "done": None, "failed": False, "errors": [],
+                        "exact": bool(item.get("at"))})
+        elif out:
+            if at and out[-1]["at"] and at >= out[-1]["at"]:
+                out[-1]["done"] = at
+            if item.get("kind") == "error":
+                out[-1]["failed"] = True
+                out[-1]["errors"].append(str(item.get("message") or ""))
+    return out
+
+
 def collect(days: int | None = None, user: str | None = None) -> list[dict]:
     """会話ファイルを1会話1レコードに畳む。
 
@@ -125,6 +148,12 @@ def collect(days: int | None = None, user: str | None = None) -> list[dict]:
             continue
 
         log = data.get("render_log") or []
+        asked = _asked(log, created)
+        # 最初の質問より前に出た失敗は、どの質問のものとも言えない
+        first_q = next((i for i, x in enumerate(log)
+                        if x.get("role") == "user" and x.get("kind") == "text"), len(log))
+        orphans = [str(x.get("message") or "") for x in log[:first_q]
+                   if x.get("kind") == "error"]
         kinds = Counter(str(i.get("kind") or "") for i in log)
         tools = [(tc.get("function") or {}).get("name")
                  for m in (data.get("messages") or [])
@@ -135,11 +164,12 @@ def collect(days: int | None = None, user: str | None = None) -> list[dict]:
             "title": str(data.get("title") or "").strip(),
             "created": created,
             "updated": _dt(data.get("updated_at")),
-            "questions": [str(i.get("content") or "").strip() for i in log
-                          if i.get("role") == "user" and i.get("kind") == "text"],
+            "asked": asked,
+            "questions": [a["text"] for a in asked if a["text"]],
             "tools": [t for t in tools if t],
             "errors": [str(i.get("message") or "") for i in log
                        if i.get("kind") == "error"],
+            "orphan_errors": orphans,
             "dbs": list(data.get("db_names") or []),
             "sqls": kinds.get("sql", 0),
             "charts": kinds.get("chart", 0),
@@ -255,20 +285,42 @@ def by_user(records: list[dict]) -> dict:
 
 
 def trend(records: list[dict]) -> dict:
-    """日ごと・曜日・時間帯。定着したのか、一度きりだったのかを見る。"""
+    """日ごと・曜日・時間帯。定着したのか、一度きりだったのかを見る。
+
+    数えるのは会話ではなく質問1件ずつ。1本の会話で何度も聞いていれば、
+    その回数だけ数える（実際にどれだけ使われたかは、そちらの方が近い）。
+    """
     if not records:
         return _empty(None)
 
-    daily = Counter(r["created"].date() for r in records if r["created"])
-    dow = Counter(r["created"].weekday() for r in records if r["created"])
-    hour = Counter(r["created"].hour for r in records if r["created"])
+    asked = [a for r in records for a in r["asked"] if a["at"]]
+    if not asked:
+        return _empty(None)
+
+    daily = Counter(a["at"].date() for a in asked)
+    dow = Counter(a["at"].weekday() for a in asked)
+    hour = Counter(a["at"].hour for a in asked)
 
     day_rows = [(str(d), n) for d, n in sorted(daily.items())]
     dow_rows = [(_WEEKDAYS[i], dow.get(i, 0)) for i in range(7)]
     hour_rows = [(f"{h:02d}時", hour.get(h, 0)) for h in range(24) if hour.get(h)]
 
-    notes = [_period_note(records),
-             "日付は会話を始めた時刻で数えています（発言ごとの時刻は保存していません）。"]
+    notes = [_period_note(records), f"質問 {len(asked)} 件を、聞かれた時刻で数えています。"]
+    rough = sum(1 for a in asked if not a["exact"])
+    if rough:
+        notes.append(f"うち {rough} 件は時刻を持たない古い会話で、"
+                     "会話の開始時刻で代用しています。")
+
+    # 応答にかかった時間。待たされているなら、対象データの絞り込みや
+    # ユーザー定義ツールの用意で短くできる。
+    waits = [(a["done"] - a["at"]).total_seconds() for a in asked
+             if a["done"] and a["at"] and (a["done"] - a["at"]).total_seconds() >= 0]
+    if waits:
+        waits.sort()
+        mid = waits[len(waits) // 2]
+        slow = sum(1 for w in waits if w >= 30)
+        notes.append(f"回答までの時間は中央値 {mid:.0f} 秒、最長 {waits[-1]:.0f} 秒。"
+                     + (f"30秒以上待った質問が {slow} 件あります。" if slow else ""))
     if len(daily) >= 2:
         days_sorted = sorted(daily)
         span = (days_sorted[-1] - days_sorted[0]).days + 1
@@ -286,10 +338,11 @@ def trend(records: list[dict]) -> dict:
         notes.append(f"最も使われる時間帯は {peak[0]}（{peak[1]} 件）。")
 
     return _out("利用の推移",
-                [_table("日ごと", ["日付", "会話"], day_rows),
-                 _table("曜日", ["曜日", "会話"], dow_rows),
-                 _table("時間帯", ["時間", "会話"], hour_rows)],
-                notes, {"active_days": len(daily)})
+                [_table("日ごと", ["日付", "質問"], day_rows),
+                 _table("曜日", ["曜日", "質問"], dow_rows),
+                 _table("時間帯", ["時間", "質問"], hour_rows)],
+                notes, {"active_days": len(daily), "questions": len(asked),
+                        "median_wait_sec": round(mid) if waits else None})
 
 
 def by_tool(records: list[dict]) -> dict:
@@ -354,8 +407,14 @@ def errors(records: list[dict]) -> dict:
     if not records:
         return _empty(None)
 
-    items = [(r["user"], r["created"], e, r["questions"][0] if r["questions"] else "")
-             for r in records for e in r["errors"]]
+    # 失敗は「どの質問で起きたか」まで対応づける。時刻と質問文が揃っていないと、
+    # カタログの何を直せばよいかを後から辿れない。
+    items = [(r["user"], a["at"], e, a["text"])
+             for r in records for a in r["asked"] for e in a["errors"]]
+    # 質問より前に出た失敗（会話を開いた直後など）。数を合わせるために拾っておく。
+    items += [(r["user"], r["created"], e, "")
+              for r in records for e in r["orphan_errors"]]
+    items.sort(key=lambda t: t[1] or datetime.min)
     if not items:
         return _out("失敗の内訳", [],
                     [_period_note(records),
@@ -370,7 +429,7 @@ def errors(records: list[dict]) -> dict:
     kind_rows = [(name, n, f"{n / len(items) * 100:.0f}%", fixes.get(name, ""))
                  for name, n in kinds.most_common()]
 
-    detail_rows = [(f"{dt:%m-%d}" if dt else "—", who, (q or "")[:40],
+    detail_rows = [(f"{dt:%m-%d %H:%M}" if dt else "—", who, (q or "")[:40],
                     msg.splitlines()[0][:80])
                    for who, dt, msg, q in items[-MAX_LIST:]]
 
@@ -401,12 +460,13 @@ def questions(records: list[dict]) -> dict:
     if not records:
         return _empty(None)
 
-    asked = [(r["created"], r["user"], q, bool(r["errors"]))
-             for r in records for q in r["questions"] if q]
+    asked = [(a["at"], r["user"], a["text"], a["failed"])
+             for r in records for a in r["asked"] if a["text"]]
     if not asked:
         return _out("聞かれた質問", [], [_period_note(records), "質問の記録がありません。"])
+    asked.sort(key=lambda t: t[0] or datetime.min)
 
-    rows = [(f"{dt:%m-%d}" if dt else "—", who, q[:60], "×" if bad else "")
+    rows = [(f"{dt:%m-%d %H:%M}" if dt else "—", who, q[:60], "×" if bad else "")
             for dt, who, q, bad in asked[-MAX_LIST:]]
 
     # 何を聞かれがちかを、語で大づかみに見る（形態素解析は入れない。傾向が分かれば足りる）

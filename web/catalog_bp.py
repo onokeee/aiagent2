@@ -741,22 +741,27 @@ def verify_examples():
 
 
 def _sample_params(tool: dict, given: dict | None = None) -> dict:
-    """試し実行に使う値。画面で入れた値があればそれを、無ければ型ごとの当たり障りない値。
+    """試し実行に使う値。画面で入れた値 → AIが添えた例 → 型ごとの既定値、の順に採る。
 
-    値が空でも「SQLが組み立つか・列が出るか」は分かる。0行でも成功として扱い、
-    そのことを画面に出す（条件が厳しいだけかもしれないため）。
+    例を使うのは、日本語だけで作ったツールを人が確かめられるようにするため。
+    空の値で流すと 0行 になり、「SQLが通った」ことしか分からない。実在する値を
+    入れて実際の行を見せれば、SQLを読まなくても正しさを判断できる。
+
+    それでも0行になることはある（条件が厳しいだけかもしれない）ので、
+    0行は失敗にせず、そのことを画面に出す。
     """
     out = {}
     for p in (tool.get("parameters") or []):
         name = str(p.get("name") or "").strip()
         if not name:
             continue
-        v = (given or {}).get(name)
-        if v not in (None, ""):
-            out[name] = v
-            continue
-        t = p.get("type") or "string"
-        out[name] = 0 if t in ("integer", "number", "boolean") else ""
+        for v in ((given or {}).get(name), p.get("example")):
+            if v not in (None, ""):
+                out[name] = v
+                break
+        else:
+            t = p.get("type") or "string"
+            out[name] = 0 if t in ("integer", "number", "boolean") else ""
     return out
 
 

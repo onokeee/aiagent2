@@ -60,6 +60,11 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def now() -> str:
+    """表示物に打つ時刻。会話を積む側（chat_bp）から使う。"""
+    return _now()
+
+
 # --- ファイル入出力 -------------------------------------------------------------
 
 def _read_json(p: Path):
@@ -190,6 +195,11 @@ def _upsert_index(user, summary: dict) -> list[dict]:
 
 def _encode_item(item: dict) -> dict:
     out = dict(item)
+    # 表示物1つずつに時刻を持たせる。会話の created_at だけでは
+    # 「その日に始めた」までしか分からず、いつ何を聞いたのかを追えない。
+    # 質問には積んだ時刻が入っているので、ここで入るのは応答側の完了時刻になる。
+    # 差を取れば、その質問にどれだけ待たされたかも分かる。
+    out.setdefault("at", _now())
     data = out.get("data")
     if isinstance(data, (bytes, bytearray)):
         if len(data) <= config.CHAT_EMBED_FILE_MAX_BYTES:

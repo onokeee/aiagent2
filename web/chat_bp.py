@@ -582,7 +582,10 @@ def _begin_turn():
     chat["messages"][0] = {"role": "system",
                            "content": llm.build_system_prompt(scope, admin=_is_admin())}
     chat["messages"].append(llm.user_message(text, images))
+    # 質問の時刻はここで入れる。保存は応答が終わってからなので、
+    # 保存時に付けると「聞いた時刻」ではなく「答え終わった時刻」になってしまう。
     chat["render_log"].append({"role": "user", "kind": "text", "content": text,
+                               "at": chats.now(),
                                **({"images": show} if show else {})})
     return chat, scope, text
 
@@ -750,7 +753,8 @@ def rewind():
     chat["messages"][0] = {"role": "system",
                            "content": llm.build_system_prompt(scope, admin=_is_admin())}
     chat["messages"].append({"role": "user", "content": text})
-    chat["render_log"].append({"role": "user", "kind": "text", "content": text})
+    chat["render_log"].append({"role": "user", "kind": "text", "content": text,
+                               "at": chats.now()})
 
     _advance(chat, scope, text)
     return _reply(chat, 0, replace=True)

@@ -15,10 +15,9 @@ def login():
     if g.get("user") is not None:
         return redirect(url_for("chat.index"))
 
-    hint, setup_needed = "", False
+    setup_needed = False
     try:
         provider = auth.get_provider()
-        hint = provider.hint
         # 常設の管理者で入れるなら、ユーザー未登録でも詰まらない
         if (provider.name == "local" and not auth.admin_enabled()
                 and not (auth.load_users_file().get("users") or [])):
@@ -44,7 +43,7 @@ def login():
                     nxt = request.args.get("next") or url_for("chat.index")
                     return redirect(nxt if nxt.startswith("/") else url_for("chat.index"))
 
-    return render_template("login.html", hint=hint, setup_needed=setup_needed)
+    return render_template("login.html", setup_needed=setup_needed)
 
 
 @bp.post("/logout")

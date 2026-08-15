@@ -159,6 +159,8 @@ code { font-size: .92em; }
     width: max-content; max-width: 330px;
     white-space: pre-line; text-align: left;
 }
+/* 画面左端に近いボタンは左揃えで出す（右揃えだと左にはみ出す） */
+.hastip--l::after { right: auto; left: 0; }
 /* サイドバーの境目は横に出す。1行なので折り返さない */
 .resizer::after {
     left: 15px; top: 50%; transform: translateY(-50%);
@@ -260,6 +262,9 @@ body.is-resizing { user-select: none; cursor: col-resize; }
 .btn--sm { padding: 4px 10px; font-size: 12.5px; }
 .btn--ghost { border-color: transparent; background: transparent; color: var(--muted); }
 .btn--ghost:hover { background: var(--surface-2); color: var(--text); }
+/* アイコンだけのボタン（ER図の保存・元に戻す・やり直す など） */
+.btn--icon { padding: 4px 7px; }
+.btn--icon .icon { width: 16px; height: 16px; }
 
 label.field { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px;
               color: var(--muted); }
@@ -802,9 +807,12 @@ details.acc.is-target {
 .er--full { position: fixed; inset: 0; z-index: 200; height: 100vh; border-radius: 0; }
 .er__toolbar {
     position: absolute; top: 10px; left: 10px; z-index: 6; display: flex; gap: 6px;
-    flex-wrap: wrap; background: var(--surface); padding: 6px;
+    flex-wrap: wrap; align-items: center; background: var(--surface); padding: 6px;
     border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow);
 }
+/* 保存・元に戻す・やり直す のまとまり。区切り線で他のボタンと分ける */
+.er__tools { display: inline-flex; gap: 2px; padding-right: 8px; margin-right: 2px;
+             border-right: 1px solid var(--border); }
 .er__viewport { position: absolute; inset: 0; overflow: hidden; cursor: grab;
     background-image: radial-gradient(var(--border) 1px, transparent 1px);
     background-size: 22px 22px; }

@@ -166,9 +166,16 @@
   <div class="tabpane" id="pane-er">
     <div class="er" id="erRoot">
       <div class="er__toolbar">
-        <button class="btn btn--sm hastip" id="erUndo" disabled
-                data-tip="テーブルを動かした操作を1手ずつ取り消します（最大20手）。&#10;関連の追加・削除や主キーはサーバに保存済みなので、ここでは戻りません（つなぎ直す／押し直すで戻せます）。">元に戻す</button>
-        <button class="btn btn--sm" id="erSave">配置を保存</button>
+        {# 保存・元に戻す・やり直す。ツールチップの中身は er.js の syncHistoryUi が
+           「次に何を戻すか」に合わせて書き換える #}
+        <span class="er__tools">
+          <button class="btn btn--sm btn--icon hastip hastip--l" id="erSave" disabled
+                  aria-label="配置を保存" data-tip="配置を保存（Ctrl+S）">{{ icon('save') }}</button>
+          <button class="btn btn--sm btn--icon hastip hastip--l" id="erUndo" disabled
+                  aria-label="元に戻す" data-tip="元に戻す（Ctrl+Z）">{{ icon('undo') }}</button>
+          <button class="btn btn--sm btn--icon hastip hastip--l" id="erRedo" disabled
+                  aria-label="やり直す" data-tip="やり直す（Ctrl+Y）">{{ icon('redo') }}</button>
+        </span>
         <button class="btn btn--sm" id="erFit">全体を表示</button>
         <button class="btn btn--sm" id="erFull">全画面</button>
         <button class="btn btn--sm hastip" id="erUsage" disabled
@@ -195,6 +202,8 @@
     <div class="small muted mt">
       列の右端から相手テーブルの列へドラッグ＝関連を作成 ／ 線をクリック＝多重度・削除 ／
       テーブル見出しをドラッグ＝移動 ／ 何もない所をドラッグ＝画面移動 ／ ホイール＝拡大縮小
+      <br>左上の {{ icon('undo', 'icon--sm') }} {{ icon('redo', 'icon--sm') }} で、移動・関連・主キー・他DBテーブルの出し入れをすべて1手ずつ戻す／やり直す（Ctrl+Z / Ctrl+Y）。
+      {{ icon('save', 'icon--sm') }} はテーブルの配置を保存（Ctrl+S。関連などは操作した時点で保存済み）
       <br>破線の枠＝他のDBから借りたテーブル（中身の編集はそのDBのカタログで）
     </div>
 

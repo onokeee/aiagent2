@@ -233,11 +233,17 @@ def relationship():
     action = body.get("action")
     alias = db.alias_for(path)
 
+    # 関連の指定は2通り。ドラッグ直後は from_table/from_column、
+    # 「元に戻す／やり直す」は保存済みの文字列 from/to（'table.col' や 'db.table.col'）で来る
+    def _ep(side):
+        if body.get(side):
+            return catalog.parse_endpoint(str(body[side]), alias)
+        return catalog.parse_endpoint(f"{body.get(side + '_table')}.{body.get(side + '_column')}", alias)
+
     if action == "add":
         lookup = _alias_lookup(alias, catalog.profile_db(path), meta)
         # テーブル名は 'table' でも 'otherdb.table' でもよい（DBまたぎ）
-        a = catalog.parse_endpoint(f"{body['from_table']}.{body['from_column']}", alias)
-        b = catalog.parse_endpoint(f"{body['to_table']}.{body['to_column']}", alias)
+        a, b = _ep("from"), _ep("to")
         if not a or not b:
             return jsonify({"error": "関連の指定が正しくありません。"}), 400
         for ep in (a, b):
@@ -275,20 +281,29 @@ def relationship():
             return jsonify({"ok": False, "check": check,
                             "from": new["from"], "to": new["to"], "cardinality": card})
         rels.append(new)
+        extra = {"added": new}
     elif action in ("update", "delete"):
-        i = int(body.get("index", -1))
+        # 位置（index）でも、保存済みの from/to 文字列でも指せる。
+        # 「元に戻す」は index がずれるので from/to で来る
+        if body.get("from") and body.get("to"):
+            i = next((k for k, r in enumerate(rels)
+                      if r.get("from") == body["from"] and r.get("to") == body["to"]), -1)
+        else:
+            i = int(body.get("index", -1))
         if not (0 <= i < len(rels)):
             return jsonify({"error": "この関連は既に削除されています。"}), 400
         if action == "delete":
-            rels.pop(i)
+            extra = {"removed": rels.pop(i)}
         else:
-            rels[i]["cardinality"] = body.get("cardinality") or rels[i].get("cardinality")
+            prev = rels[i].get("cardinality")
+            rels[i]["cardinality"] = body.get("cardinality") or prev
+            extra = {"updated": {**rels[i], "previous": prev}}
     else:
         return jsonify({"error": "不正な操作です。"}), 400
 
     catalog.save_meta(path, meta)
     profile = catalog.profile_db(path)
-    return jsonify({"ok": True, "er": _er_payload(path, profile, catalog.load_meta(path))})
+    return jsonify({"ok": True, "er": _er_payload(path, profile, catalog.load_meta(path)), **extra})
 
 
 @bp.get("/api/catalog/table-info")

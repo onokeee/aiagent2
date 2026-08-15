@@ -1,5 +1,5 @@
 /* ER図キャンバス。ライブラリなしで、テーブル移動・関連のドラッグ作成・
-   多重度の変更・削除・元に戻す・拡大縮小をまかなう。
+   多重度の変更・削除・元に戻す／やり直す・拡大縮小をまかなう。
 
    座標系は2つ。
      world  … ノードが持つ論理座標（.meta.yaml の er_layout と同じ）
@@ -9,7 +9,14 @@ const ER = (() => {
     let data = { nodes: [], edges: [], alias: '' };
     let view = { tx: 40, ty: 40, k: 1 };
     let selected = null;          // {type:'edge'|'table', ...}
-    let undoStack = [];
+    // 履歴（元に戻す／やり直す）。ER図上のすべての操作を1手ずつ戻せる。
+    // 操作ごとに「戻す手順」「やり直す手順」を関数で積む（コマンド方式）。
+    //   移動                       … 画面の中だけ動かす（保存は 💾）
+    //   関連の追加・削除・多重度 /
+    //   主キー / 他DBテーブルの出し入れ … サーバに保存済みなので、逆の操作をサーバに送って戻す
+    let past = [], future = [];
+    const HIST_MAX = 50;
+    let savedLayout = '';         // 最後に保存（または読み込み）した配置。💾 の活性判定に使う
     let root, viewport, world, svg, panel;
     // 読み取り専用（チャットからの表示）。編集の入口だけを閉じ、
     // 移動・パン・ズーム・全画面はそのまま使えるようにする。
@@ -369,14 +376,7 @@ const ER = (() => {
                 // 無くなるだけなので外させない。手で足したものだけ外せる
                 (!ro && n.pinned) ? el('button', {
                     class: 'btn btn--sm', style: 'margin-top:8px',
-                    onclick: async () => {
-                        try {
-                            const r = await api('/api/catalog/er-external',
-                                { db: CAT.db, action: 'remove', table: n.id });
-                            applyEr(r.er); closePanel();
-                            toast(`${n.id} をキャンバスから外しました。`);
-                        } catch (err) { toast(err.message, 'err'); }
-                    },
+                    onclick: () => toggleExternal('remove', n.id),
                 }, 'キャンバスから外す')
                 : el('div', { class: 'small muted', style: 'margin-top:8px' },
                     n.incoming
@@ -459,9 +459,14 @@ const ER = (() => {
                     onclick: async () => {
                         const cols = [...panel.querySelectorAll('[data-pk]')]
                             .filter(c => c.checked).map(c => c.dataset.pk);
-                        const r = await api('/api/catalog/primary-key',
-                            { db: CAT.db, table: n.table, columns: cols });
-                        data = r.er; render(); closePanel(); toast('主キーを保存しました。');
+                        const before = n.columns.filter(c => c.pk).map(c => c.name);
+                        try {
+                            await pkApi(n.table, cols);
+                            closePanel(); toast('主キーを保存しました。');
+                            record({ label: `${n.table} の主キーを変更`,
+                                     undo: () => pkApi(n.table, before),
+                                     redo: () => pkApi(n.table, cols) });
+                        } catch (e) { toast(e.message, 'err'); }
                     },
                 }, '主キーを保存')));
         }
@@ -470,11 +475,60 @@ const ER = (() => {
 
     /* --- 変更（サーバに保存して描き直す） ---------------------------------------- */
 
-    function pushUndo() {
-        undoStack.push({ nodes: data.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })) });
-        if (undoStack.length > 20) undoStack.shift();
-        const b = $('#erUndo');
-        if (b) b.disabled = false;
+    /* --- 履歴 ---------------------------------------------------------------- */
+
+    function record(entry) {
+        past.push(entry);
+        if (past.length > HIST_MAX) past.shift();
+        future = [];                      // 新しい操作をしたら「やり直す」先は消える
+        syncHistoryUi();
+    }
+
+    async function undo() {
+        const e = past.pop();
+        if (!e) return;
+        try { await e.undo(); future.push(e); toast(`元に戻しました: ${e.label}`); }
+        catch (err) { toast(`元に戻せませんでした: ${err.message}`, 'err'); }
+        syncHistoryUi();
+    }
+
+    async function redo() {
+        const e = future.pop();
+        if (!e) return;
+        try { await e.redo(); past.push(e); toast(`やり直しました: ${e.label}`); }
+        catch (err) { toast(`やり直せませんでした: ${err.message}`, 'err'); }
+        syncHistoryUi();
+    }
+
+    function layoutSnapshot() {
+        return JSON.stringify(data.nodes.map(n => [n.id, Math.round(n.x), Math.round(n.y)]).sort());
+    }
+
+    /* ボタンの活性と、次に戻す／やり直す操作名をツールチップに出す */
+    function syncHistoryUi() {
+        const u = $('#erUndo'), r = $('#erRedo'), sv = $('#erSave');
+        if (u) {
+            u.disabled = !past.length;
+            u.dataset.tip = past.length ? `元に戻す（Ctrl+Z）: ${past[past.length - 1].label}`
+                                        : '元に戻す（Ctrl+Z）\nまだ操作していません。';
+        }
+        if (r) {
+            r.disabled = !future.length;
+            r.dataset.tip = future.length ? `やり直す（Ctrl+Y）: ${future[future.length - 1].label}`
+                                          : 'やり直す（Ctrl+Y）\n戻した操作はありません。';
+        }
+        if (sv) {
+            const dirty = layoutSnapshot() !== savedLayout;
+            sv.disabled = !dirty;
+            sv.dataset.tip = dirty ? '配置を保存（Ctrl+S）\nテーブルの位置に、保存していない変更があります。'
+                                   : '配置を保存（Ctrl+S）\nテーブルの位置は保存済みです。関連・主キーなどは操作した時点で保存されています。';
+        }
+    }
+
+    function setPos(id, pos) {
+        const n = data.nodes.find(x => x.id === id);
+        if (n) { n.x = pos.x; n.y = pos.y; }
+        render(); syncHistoryUi();
     }
 
     /** サーバから返ってきた図を反映する。画面上の位置は動かさない
@@ -483,18 +537,66 @@ const ER = (() => {
         const positions = Object.fromEntries(data.nodes.map(n => [n.id, [n.x, n.y]]));
         data = er;
         data.nodes.forEach(n => { if (positions[n.id]) [n.x, n.y] = positions[n.id]; });
-        render();
+        render(); syncHistoryUi();
     }
 
-    async function mutate(body, silent) {
+    /* 関連API を1回叩いて図を反映する（履歴には積まない。undo/redo からも使う） */
+    async function relApi(body) {
+        const r = await api('/api/catalog/relationship', { db: CAT.db, ...body });
+        if (r.check) return r;                 // 実データ判定で止まった
+        applyEr(r.er); closePanel();
+        return r;
+    }
+
+    /* 人の操作から呼ぶ。サーバに保存したうえで、逆の操作を履歴に積む */
+    async function mutate(body) {
         try {
-            // 関連の変更はサーバに保存されるので「元に戻す」（配置の取り消し）の対象外。
-            // 消した関連はもう一度つなぎ直す、多重度は押し直す、で戻す。
-            const r = await api('/api/catalog/relationship', { db: CAT.db, ...body });
+            const r = await relApi(body);
             // 実データを見て「結ぶべきでない／要確認」と判定されたら、理由を出して止める
             if (r.check) { showLinkCheck(r, body); return; }
-            applyEr(r.er); closePanel();
+            if (body.action === 'add' && r.added) {
+                const a = r.added;
+                record({ label: `関連を追加（${a.from} → ${a.to}）`,
+                         undo: () => relApi({ action: 'delete', from: a.from, to: a.to }),
+                         // 一度通した線なので、やり直しでは確認（warn）を飛ばす。block は元々通らない
+                         redo: () => relApi({ action: 'add', from: a.from, to: a.to,
+                                              cardinality: a.cardinality, force: true }) });
+            } else if (body.action === 'delete' && r.removed) {
+                const a = r.removed;
+                record({ label: `関連を削除（${a.from} → ${a.to}）`,
+                         undo: () => relApi({ action: 'add', from: a.from, to: a.to,
+                                              cardinality: a.cardinality, force: true }),
+                         redo: () => relApi({ action: 'delete', from: a.from, to: a.to }) });
+            } else if (body.action === 'update' && r.updated) {
+                const a = r.updated;
+                record({ label: `多重度を ${a.previous} → ${a.cardinality}（${a.from}）`,
+                         undo: () => relApi({ action: 'update', from: a.from, to: a.to, cardinality: a.previous }),
+                         redo: () => relApi({ action: 'update', from: a.from, to: a.to, cardinality: a.cardinality }) });
+            }
         } catch (e) { toast(e.message, 'err'); }
+    }
+
+    async function extApi(action, table) {
+        const r = await api('/api/catalog/er-external', { db: CAT.db, action, table });
+        applyEr(r.er); closePanel();
+        return r;
+    }
+
+    /* 他DBのテーブルを図に置く／外す（履歴に積む） */
+    async function toggleExternal(action, table) {
+        try {
+            await extApi(action, table);
+            toast(action === 'add' ? `${table} を図に置きました。` : `${table} を外しました。`);
+            record({ label: action === 'add' ? `${table} を図に置く` : `${table} を図から外す`,
+                     undo: () => extApi(action === 'add' ? 'remove' : 'add', table),
+                     redo: () => extApi(action, table) });
+        } catch (e) { toast(e.message, 'err'); }
+    }
+
+    async function pkApi(table, columns) {
+        const r = await api('/api/catalog/primary-key', { db: CAT.db, table, columns });
+        applyEr(r.er);
+        return r;
     }
 
     /* 線を引いた先が結べない／結ぶべきでないときのパネル。
@@ -544,8 +646,6 @@ const ER = (() => {
                 const sx = ev.clientX, sy = ev.clientY, ox = node.x, oy = node.y;
                 let moved = false;
                 const move = e2 => {
-                    // 動かし始めた瞬間に元の位置を積む（クリックだけなら積まない）
-                    if (!moved) pushUndo();
                     node.x = ox + (e2.clientX - sx) / view.k;
                     node.y = oy + (e2.clientY - sy) / view.k;
                     box.style.left = `${node.x}px`; box.style.top = `${node.y}px`;
@@ -554,7 +654,12 @@ const ER = (() => {
                 const up = () => {
                     document.removeEventListener('pointermove', move);
                     document.removeEventListener('pointerup', up);
-                    if (!moved) selectTable(node.id);   // 読み取り専用でも中身は見られる
+                    if (!moved) { selectTable(node.id); return; }   // 読み取り専用でも中身は見られる
+                    // 動かし終わった位置を1手として積む（クリックだけなら積まない）
+                    const before = { x: ox, y: oy }, after = { x: node.x, y: node.y };
+                    record({ label: `${node.table} を移動`,
+                             undo: () => setPos(node.id, before),
+                             redo: () => setPos(node.id, after) });
                 };
                 document.addEventListener('pointermove', move);
                 document.addEventListener('pointerup', up);
@@ -657,12 +762,8 @@ const ER = (() => {
                     'data-key': `${d.alias} ${t.table}`,
                     title: fixed ? '関連が指しているので置かれています（外せません）' : '',
                     onclick: fixed ? null : async () => {
-                        try {
-                            const r = await api('/api/catalog/er-external', {
-                                db: CAT.db, action: on ? 'remove' : 'add', table: t.id });
-                            applyEr(r.er); close();
-                            toast(on ? `${t.id} を外しました。` : `${t.id} を図に置きました。`);
-                        } catch (e) { toast(e.message, 'err'); }
+                        close();
+                        await toggleExternal(on ? 'remove' : 'add', t.id);
                     },
                 },
                     el('span', { class: 'ico' }, icon(on ? 'check' : 'plus', 'icon--sm')),
@@ -748,23 +849,15 @@ const ER = (() => {
     }
 
     async function saveLayout() {
+        if (ro) return;
+        const snap = layoutSnapshot();
+        if (snap === savedLayout) { toast('配置は保存済みです。'); return; }
         const layout = Object.fromEntries(data.nodes.map(n => [n.id, [Math.round(n.x), Math.round(n.y)]]));
-        await api('/api/catalog/layout', { db: CAT.db, layout });
-        toast('配置を保存しました。');
-    }
-
-    /* 「元に戻す」は配置（テーブルの位置）だけを1手ずつ戻す。
-       関連の追加・削除・多重度・主キーはサーバに保存済みなので、ここでは戻さない。 */
-    function undo() {
-        const prev = undoStack.pop();
-        if (!prev) return;
-        prev.nodes.forEach(p => {
-            const n = data.nodes.find(x => x.id === p.id);
-            if (n) { n.x = p.x; n.y = p.y; }
-        });
-        render();
-        const b = $('#erUndo');
-        if (b) b.disabled = !undoStack.length;
+        try {
+            await api('/api/catalog/layout', { db: CAT.db, layout });
+            savedLayout = snap; syncHistoryUi();
+            toast('配置を保存しました。');
+        } catch (e) { toast(e.message, 'err'); }
     }
 
     function init(opts) {
@@ -776,14 +869,17 @@ const ER = (() => {
         if (!data) return;
         // チャットでは開くたびに init し直すので、前回の状態を持ち越さない
         view = { tx: 40, ty: 40, k: 1 };
-        selected = null; undoStack = [];
+        selected = null; past = []; future = [];
         svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%');
         render();
+        savedLayout = layoutSnapshot();      // 読み込んだ配置＝保存済みとみなす
+        syncHistoryUi();
         wireViewport();
         setTimeout(fit, 30);
 
         $('#erSave')?.addEventListener('click', saveLayout);
         $('#erUndo')?.addEventListener('click', undo);
+        $('#erRedo')?.addEventListener('click', redo);
         $('#erFit')?.addEventListener('click', fit);
         $('#erFull')?.addEventListener('click', () => {
             root.classList.toggle('er--full');
@@ -806,7 +902,17 @@ const ER = (() => {
             document.addEventListener('keydown', ev => {
                 if (ev.key === 'Escape' && root && root.classList.contains('er--full')) {
                     $('#erFull')?.click();
+                    return;
                 }
+                // Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) / Ctrl+S は、ER図が見えていて
+                // 入力欄にいないときだけ受ける（他のタブやチャットでは横取りしない）
+                if (ro || !root || !(ev.ctrlKey || ev.metaKey)) return;
+                if (!root.getClientRects().length) return;                    // 別タブで隠れている
+                if (/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName) || ev.target.isContentEditable) return;
+                const k = ev.key.toLowerCase();
+                if (k === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); }
+                else if (k === 'y' || (k === 'z' && ev.shiftKey)) { ev.preventDefault(); redo(); }
+                else if (k === 's') { ev.preventDefault(); saveLayout(); }
             });
         }
     }

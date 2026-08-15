@@ -408,55 +408,27 @@ async function saveJob() {
             start_at: $('#jobStart').value,
         });
         toast('定期取り込みに登録しました。「DBの管理」タブで確認できます。');
-        refreshManage();
+        refreshLocked();
     } catch (e) { toast(e.message, 'err', 9000); }
 }
 
-/* --- 定期取り込みの状態 -----------------------------------------------------------
-   DBとテーブルの一覧・削除は「データカタログ > DB・テーブル」に移した。
-   ここに残るのは、スケジューラの状態と、対象テーブルが無い定期取り込みだけ。 */
-
-// 手で更新してはいけないテーブル {DBファイル: {テーブル: 理由}}。管理タブを読むたび更新する。
+/* --- 手で更新してはいけないテーブル ---------------------------------------------
+   定期実行＋追記のテーブルは、手で足すと取得日時が1回ぶん余計に増えて間隔が崩れる。
+   取り込み先を選ぶ欄でそのテーブルに鍵をかけるため、状態だけ取っておく。
+   定期取り込みの一覧・操作・スケジューラの状態は「データカタログ > DB・テーブル」にある。 */
 let lockedTables = {};
 
-function renderManage(m) {
-    lockedTables = m.locked || {};
-    if ($('#dbTarget')) syncDest();       // 取り込みタブを開いたままでも鍵が効くように
-    renderSched(m.sched);
-    const btn = $('#runDue');
-    btn.textContent = `期限が来た${m.due ?? 0}件を今すぐ更新`;
-    btn.disabled = !m.due;
-    // 定期取り込みが設定されているテーブルだけを、DBごとに一覧する
-    const box = $('#dbDetails');
-    box.replaceChildren();
-    const withJobs = m.dbs.map(d => ({ ...d, tables: d.tables.filter(t => (t.jobs || []).length) }))
-                          .filter(d => d.tables.length);
-    if (!withJobs.length) {
-        box.append(el('div', { class: 'small muted' },
-            '定期取り込みはまだ設定されていません。「ファイルから取り込む」で取り込むときに登録できます。'));
-    }
-    withJobs.forEach(d => {
-        const card = el('div', { class: 'card' },
-            el('div', { class: 'card__title', style: 'margin:0 0 6px' }, d.name));
-        d.tables.forEach(t => card.append(tableCard(d.name, t)));
-        box.append(card);
-    });
-    renderOrphans(m.orphans || []);
-}
-
-async function refreshManage() {
-    renderManage(await api('/api/import/manage', undefined, 'GET'));
+async function refreshLocked() {
+    try {
+        const m = await api('/api/import/manage', undefined, 'GET');
+        lockedTables = m.locked || {};
+        if ($('#dbTarget')) syncDest();
+    } catch (e) { /* 鍵が取れなくても取り込みはできる */ }
 }
 
 /* --- 起動 ------------------------------------------------------------------- */
 
 document.addEventListener('DOMContentLoaded', () => {
-    $$('.tab').forEach(tab => tab.addEventListener('click', () => {
-        $$('.tab').forEach(t => t.classList.toggle('is-active', t === tab));
-        $$('.tabpane').forEach(p => p.classList.toggle('is-active', p.id === `pane-${tab.dataset.pane}`));
-        if (tab.dataset.pane === 'manage') refreshManage();
-    }));
-
     loadDirs();
     wireDirs();
     $('#pickServer')?.addEventListener('click', () => openBrowser(null));
@@ -476,13 +448,6 @@ document.addEventListener('DOMContentLoaded', () => {
         $(sel)?.addEventListener('change', loadPreview));
     $('#reload')?.addEventListener('click', loadPreview);
 
-    renderManage(IMP.manage);
-    $('#refreshTables').addEventListener('click', refreshManage);
-    $('#runDue').addEventListener('click', async ev => {
-        ev.target.disabled = true;
-        const r = await api('/api/jobs/run', { all_due: true });
-        r.results.forEach(x => toast(`${x.name}: ${x.message}`, x.ok ? 'ok': 'err', 7000));
-        if (!r.results.length) toast('期限が来たジョブはありませんでした。', 'warn');
-        refreshManage();
-    });
+    lockedTables = (IMP.manage || {}).locked || {};
+    if ($('#dbTarget')) syncDest();
 });

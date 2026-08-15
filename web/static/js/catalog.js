@@ -206,6 +206,15 @@ async function loadManage(force) {
         $('#dbManageInfo') && ($('#dbManageInfo').textContent = e.message);
         return null;
     }
+    // 定期取り込みの全体状態（スケジューラ・期限が来た件数・宙に浮いた設定）
+    renderSched(manageData.sched);
+    const due = $('#runDue');
+    if (due) {
+        due.textContent = `期限が来た${manageData.due ?? 0}件を今すぐ更新`;
+        due.disabled = !manageData.due;
+    }
+    renderOrphans(manageData.orphans || []);
+
     const d = (manageData.dbs || []).find(x => x.name === CAT.db);
     // DB情報の行: サイズ・更新日・削除ボタン
     const info = $('#dbManageInfo'), slot = $('#dbDeleteSlot');
@@ -248,6 +257,18 @@ function wireManage() {
     }));
     // DB情報を開いたときにサイズ・削除ボタンを出す
     $('#dbInfo')?.addEventListener('toggle', ev => { if (ev.target.open) loadManage(); });
+    // 定期取り込みの全体状態は開いてすぐ見えるようにする
+    $('#refreshTables')?.addEventListener('click', () => loadManage(true));
+    $('#runDue')?.addEventListener('click', async ev => {
+        ev.target.disabled = true;
+        try {
+            const r = await api('/api/jobs/run', { all_due: true });
+            r.results.forEach(x => toast(`${x.name}: ${x.message}`, x.ok ? 'ok' : 'err', 7000));
+            if (!r.results.length) toast('期限が来たジョブはありませんでした。', 'warn');
+        } catch (e) { toast(e.message, 'err', 9000); }
+        loadManage(true);
+    });
+    loadManage();
 }
 
 function wireTables() {

@@ -382,7 +382,7 @@ function exampleCard(item) {
         btn.disabled = true;
         try {
             const r = await api('/api/chat/save-example', {
-                question: item.question, sql: item.sql, description: item.summary });
+                db: item.db, question: item.question, sql: item.sql, description: item.summary });
             toast(r.message, 'ok', 8000);
             btn.textContent = '登録済み';
         } catch (e) { toast(e.message, 'err', 8000); btn.disabled = false; }

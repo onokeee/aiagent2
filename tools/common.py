@@ -61,7 +61,7 @@ def fetch(spec: dict, scope: list[dict], *, label: str | None = None,
         if entry is None:
             raise advanced.AnalysisError(
                 f"result_id '{rid}' のデータが見つかりません。"
-                "古くなって捨てられたか、別のDBを選んでいたときの結果です。"
+                "古くなって捨てられたか、別の会話の結果です。"
                 "sql を指定して取り直してください。")
         # 預かっているのは2,000行に切り詰めた結果のことがある。ファイル出力のように
         # もっと大きな上限で全行欲しい呼び出しなら、預けたときのSQLで取り直す。

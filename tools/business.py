@@ -138,9 +138,13 @@ def _looks_like_date(col: dict, sample: str = "") -> bool:
 def _data_quality(args: dict, scope: list[dict]) -> dict:
     """選択中のDBを見て、分析の前に気づいておくべき異常を洗い出す。"""
     if not scope:
-        return _err("対象のDBが選択されていません。")
+        return _err("対象のDBがありません。")
 
+    # テーブル名は 'stocks' でも 'demo_inventory.stocks' でもよい
+    # （プロンプトが『DB名.テーブル名』で書くよう求めているので、後者で来ることが多い）
     want = [str(t) for t in (args.get("tables") or [])]
+    def _wanted(alias, tname):
+        return (not want) or tname in want or f"{alias}.{tname}" in want
     issues, tbl_rows, col_rows, ref_rows = [], [], [], []
     checked = 0
 
@@ -165,7 +169,7 @@ def _data_quality(args: dict, scope: list[dict]) -> dict:
         for tname, t in (profile.get("tables") or {}).items():
             if tname not in allowed:
                 continue
-            if want and tname not in want:
+            if not _wanted(alias, tname):
                 continue
             if checked >= _MAX_TABLES:
                 break
@@ -238,7 +242,8 @@ def _data_quality(args: dict, scope: list[dict]) -> dict:
 
     if not tbl_rows:
         return _err("調べられるテーブルがありませんでした。"
-                    "サイドバーで対象のテーブルを選んでいるか確認してください。")
+                    "tables に指定した名前が合っているか確認してください"
+                    "（例: 'stocks' または 'demo_inventory.stocks'）。")
 
     head = ["テーブル", "行数", "列数", "主キー", "主キー重複"]
     if any(len(r) > 5 for r in tbl_rows):

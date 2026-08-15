@@ -418,7 +418,19 @@ def save_layout():
     body = request.json or {}
     path = db.path_for(body["db"])
     meta = catalog.load_meta(path)
-    meta["er_layout"] = {**(meta.get("er_layout") or {}), **(body.get("layout") or {})}
+    incoming = body.get("layout") or {}
+    if not isinstance(incoming, dict):
+        return jsonify({"error": "配置の形式が正しくありません。"}), 400
+    clean = {}
+    for k, v in incoming.items():
+        # 1ノード = [x, y] の数値2つ。それ以外は受け付けない（保存すると以後ER図が読めなくなる）
+        if not isinstance(v, (list, tuple)) or len(v) != 2:
+            return jsonify({"error": f"配置の形式が正しくありません（{k}）。"}), 400
+        try:
+            clean[str(k)] = [int(round(float(v[0]))), int(round(float(v[1])))]
+        except (TypeError, ValueError):
+            return jsonify({"error": f"配置の座標が数値ではありません（{k}）。"}), 400
+    meta["er_layout"] = {**(meta.get("er_layout") or {}), **clean}
     catalog.save_meta(path, meta)
     return jsonify({"ok": True})
 

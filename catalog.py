@@ -639,11 +639,17 @@ def find_example(examples: list[dict], sql: str) -> dict | None:
 def load_layout(meta: dict) -> dict:
     """メタからノード座標を読む。{'alias.table': (x, y)}"""
     raw = meta.get("er_layout") or {}
+    if not isinstance(raw, dict):
+        return {}
     out = {}
     for k, v in raw.items():
+        # 期待する形は [x, y]。辞書や文字列など形の違う項目は読み飛ばす
+        # （1つ壊れているだけでER図全体が出なくなるのを避ける）
+        if not isinstance(v, (list, tuple)) or len(v) < 2:
+            continue
         try:
             out[str(k)] = (float(v[0]), float(v[1]))
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError):
             continue
     return out
 
@@ -1208,7 +1214,7 @@ def prompt_for_scope(scope: list[dict], limit: int | None = None) -> str:
     # ここに載っているのはテーブル単位の説明までで、列名は入っていない。
     # それを言わずに渡すと「その列は無い」と早合点して、できることまで断ってしまう。
     return (compact + "\n"
-            "【重要】選択中のDBが多いため、上には各テーブルの説明までしか載せていません。"
+            "【重要】対象のDBが多いため、上には各テーブルの説明までしか載せていません。"
             "**列名は1つも載っていません。**\n"
             "そのため、上に見当たらないという理由で「その列は無い」「そのテーブルは無い」と"
             "判断してはいけません。必要な列があるかどうかは、必ず describe_table を呼んで"

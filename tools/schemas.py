@@ -1108,13 +1108,13 @@ BUILTIN_TOOLS = [
                 "「数字が合わない」「件数がおかしい」「このデータは信用できるか」"
                 "と言われたとき、また重要な集計を出す前の確認に使う。"
                 "行数・主キーの重複・空の列・親に存在しない外部キー・日付の範囲を調べ、"
-                "深刻な順に並べて返す。SQLは要らない（選択中のDBを直接見る）。"
+                "深刻な順に並べて返す。SQLは要らない（対象のDBを直接見る）。"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "tables": {"type": "array", "items": {"type": "string"},
-                               "description": "調べるテーブル名。省略すると選択中のテーブルを順に見る。"},
+                               "description": "調べるテーブル名（'stocks' でも 'demo_inventory.stocks' でもよい）。省略すると対象DBのテーブルを順に見る。"},
                     "title": {"type": "string", "description": "見出し。"},
                 },
                 "required": [],

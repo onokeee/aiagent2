@@ -320,7 +320,8 @@ def delete_chat():
 @bp.post("/api/chat/rename")
 @login_required
 def rename_chat():
-    chats.rename_chat(g.user, request.json.get("id"), request.json.get("title") or "")
+    if not chats.rename_chat(g.user, request.json.get("id"), request.json.get("title") or ""):
+        return jsonify({"error": "この会話は見つかりませんでした。"}), 404
     return jsonify({"ok": True})
 
 
@@ -805,13 +806,6 @@ def rewind():
 # 宛先の間違いは取り消せないため、AIの判断だけで外部に何かを出さない。
 # =============================================================================
 
-@bp.get("/api/mail/status")
-@admin_required
-def mail_status():
-    """送信サーバの状態と送信ログ。設定情報なので管理者のみ。"""
-    return jsonify({**mailer.status(), "log": mailer.sent_log(20)})
-
-
 def _attachments_for(chat: dict, names: list) -> tuple[list, list]:
     """この会話で作ったファイルから、名前が一致する添付を集める。
 
@@ -841,18 +835,6 @@ def _attachments_for(chat: dict, names: list) -> tuple[list, list]:
             out.append({"filename": hit.get("filename"), "mime": hit.get("mime"),
                         "data": hit["data"]})
     return out, missing
-
-
-@bp.post("/api/mail/preview")
-@login_required
-def mail_preview():
-    """送信前の最終確認。実物と同じ組み立てをして中身を返す。"""
-    draft = (request.json or {}).get("draft") or {}
-    chat = _load_current()
-    files, missing = _attachments_for(chat, draft.get("attach_filenames"))
-    view = mailer.preview(draft, files)
-    view["missing_attachments"] = missing
-    return jsonify(view)
 
 
 @bp.post("/api/mail/send")
@@ -956,10 +938,16 @@ def save_example():
     # DBをまたぐ例文（人事の勤怠 × マスタの社員、など）は珍しくないため、
     # 「1つだけ選んでいるとき」に限ると保存できる場面が狭くなりすぎる。
     hits = dbs_in_sql(sql, scope)
-    target = hits[0] if hits else (scope[0] if len(scope) == 1 else None)
+    # 登録カード（propose_example）は置き場のDBを持っている。あればそれを使う。
+    # SQLに DB名 が無い（単一DBの略記など）ときも、カードの db で決められる。
+    asked = (request.json.get("db") or "").strip()
+    target = next((s for s in scope if s["name"] == asked or s.get("alias") == asked), None) if asked else None
+    if target is None:
+        target = hits[0] if hits else (scope[0] if len(scope) == 1 else None)
     if target is None:
         return jsonify({"error": "このSQLがどのDBのものか判断できませんでした。"
-                                 "対象データでDBを1つだけ選んでから保存してください。"}), 400
+                                 "テーブル名を『DB名.テーブル名』の形で書いたSQLにするか、"
+                                 "db を指定してください。"}), 400
 
     p = Path(target["path"])
     meta = catalog.load_meta(p)

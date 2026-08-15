@@ -38,11 +38,17 @@
         <span class="badge">{{ f.tables|length }}</span>
       </div>
       <div class="dbpick__tables">
+        {# テーブル名は押すと中身（全行）を別タブで開く。名前にマウスを乗せれば説明が出る #}
         {% for t in f.tables %}
-          <label><span data-desc-title="{{ t.name }}" data-desc="{{ t.description }}{% if t.problem %}
-⚠ 定期取り込み: {{ t.problem }}{% endif %}"
-                  data-desc-meta="{{ '{:,}行'.format(t.rows) if t.rows is not none else '行数不明' }} / {{ t.columns }}列">{{ t.name }}</span>
-            {% if t.problem %}<span class="warnmark" title="{{ t.problem }}">{{ icon('alert', 'icon--sm') }}</span>{% endif %}</label>
+          <div class="dbpick__table">
+            <a href="{{ url_for('tableview.index') }}?db={{ f.name|urlencode }}&table={{ t.name|urlencode }}"
+               target="_blank" rel="noopener" class="dbpick__tname"
+               data-desc-title="{{ t.name }}" data-desc="{{ t.description }}{% if t.problem %}
+⚠ 定期取り込み: {{ t.problem }}{% endif %}
+（クリックで中身を別タブで開きます）"
+               data-desc-meta="{{ '{:,}行'.format(t.rows) if t.rows is not none else '行数不明' }} / {{ t.columns }}列">{{ t.name }}</a>
+            {% if t.problem %}<span class="warnmark" title="{{ t.problem }}">{{ icon('alert', 'icon--sm') }}</span>{% endif %}
+          </div>
         {% endfor %}
       </div>
     </div>

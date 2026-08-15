@@ -362,7 +362,7 @@ function syncDest() {
     }
     if (tables.includes(t) && $('#mode').value === 'replace') {
         note.append(el('div', { class: 'alert alert--warn mt' },
-            `${t} は既にあります。洗い替えなので、いま入っているデータは消えて入れ替わります。`));
+            `${t} は既にあります。全件入れ替えなので、いま入っている行はすべて削除されて入れ直されます。`));
     }
 }
 

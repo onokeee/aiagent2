@@ -37,7 +37,7 @@ INTERVALS = {
     "1週間ごと": 10080,
 }
 MODES = {
-    "replace": "洗い替え（毎回まるごと入れ替える）",
+    "replace": "全件入れ替え（毎回すべて削除して入れ直す）",
     "append": "追記（前回までのデータを残して足す）",
 }
 
@@ -82,7 +82,7 @@ def validate(job: dict, check_start: bool = True) -> list[str]:
             errors.append(f"開始日時に過去の時刻は指定できません"
                           f"（指定: {start:%Y-%m-%d %H:%M}）。今より後の日時にしてください。")
 
-    # 取得日時列は更新の仕方によらず必須。洗い替えでも「いつ時点のデータか」が
+    # 取得日時列は更新の仕方によらず必須。全件入れ替えでも「いつ時点のデータか」が
     # 分からないと、取り込み後の分析で断面を説明できない。
     if not str(job.get("timestamp_column") or "").strip():
         errors.append("取得日時の列名が必須です。")
@@ -109,7 +109,7 @@ def manual_run_blocked(job: dict) -> str | None:
       ・次回予定が「前回実行＋間隔」で決まるので、手で走らせた分だけ後ろにずれる
       ・保存回数を1回ぶん余計に使い、その回だけ間隔の違うデータが混ざる
     となって、せっかく決めた更新頻度が崩れる。
-    洗い替えや「手動のみ」の設定は、何度走らせても頻度の意味が変わらないので通す。
+    全件入れ替えや「手動のみ」の設定は、何度走らせても頻度の意味が変わらないので通す。
     """
     if int(job.get("interval_minutes") or 0) <= 0:
         return None
@@ -361,19 +361,19 @@ def _run_job_locked(job: dict, kind: str = "auto", user: str | None = None) -> d
         mode = job.get("mode") or "replace"
         ts_col = job.get("timestamp_column") or config.IMPORT_TIMESTAMP_COLUMN
         if len(df) == 0:
-            # 見出しだけのファイル（上流の出力が失敗した等）で洗い替えると、
+            # 見出しだけのファイル（上流の出力が失敗した等）で全件入れ替えすると、
             # テーブルが空になり「成功」で終わる。前回の内容を残して止める。
-            # 本当に0件にしたいときは、取り込み画面から手で洗い替える。
+            # 本当に0件にしたいときは、取り込み画面から手で入れ替える。
             raise importer.ImportError_(
                 f"{path.name} にデータ行がありません（見出しだけ）。"
                 f"{'テーブルを空にしないため、前回の内容を残しました。' if mode != 'append' else '追記する行が無いため何もしていません。'}"
-                "本当に0件なら、取り込み画面から手で洗い替えてください。")
+                "本当に0件なら、取り込み画面から手で入れ替えてください。")
         n, degraded = importer.import_dataframe(
             db_path, job["table"], df, cols, mode=mode,
             timestamp_col=ts_col,
             timestamp_value=started.isoformat(timespec="seconds"),
         )
-        message = f"{n:,}行を{'追記' if mode == 'append' else '洗い替え'}しました。"
+        message = f"{n:,}行を{'追記' if mode == 'append' else '全件入れ替え'}しました。"
         if degraded:
             # 数値列に文字が混ざった。取り込み自体は通るが集計がずれるので、黙って通さない
             message += (f" ⚠ 数値にできない値があったため文字として保存した列: {', '.join(degraded)}"

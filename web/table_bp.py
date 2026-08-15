@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import json
+
 from flask import Blueprint, jsonify, render_template, request
 
 import catalog
@@ -67,6 +69,72 @@ def index():
     )
 
 
+def _like(text: str) -> str:
+    """LIKE のワイルドカードを打ち消して、入力された文字そのものを探す。"""
+    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _filters_sql(raw: str, cols: list[str]) -> tuple:
+    """列ごとの絞り込み（Excelのフィルターに相当）を WHERE 句にする。
+
+    raw は画面から来るJSON:
+      {"店舗コード": {"values": ["S01", null]},        … 選んだ値だけ（null は NULL 行）
+       "売上金額":   {"op": ">=", "value": "100000"},  … 数の比較
+       "顧客名":     {"op": "contains", "value": "商事"}}
+    列名は実在するものだけを通し、値は必ずプレースホルダで渡す。
+    """
+    try:
+        spec = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        return "", [], {}
+    if not isinstance(spec, dict):
+        return "", [], {}
+
+    OPS = {"=": "=", "!=": "<>", ">": ">", ">=": ">=", "<": "<", "<=": "<="}
+    clauses, params, used = [], [], {}
+    for col, f in spec.items():
+        if col not in cols or not isinstance(f, dict):
+            continue
+        q = _qi(col)
+        vals = f.get("values")
+        if isinstance(vals, list) and vals:
+            # 値の選択。NULL は IN で拾えないので別に足す
+            plain = [v for v in vals if v is not None]
+            parts = []
+            if plain:
+                parts.append(f"CAST({q} AS TEXT) IN ({', '.join('?' for _ in plain)})")
+                params.extend(str(v) for v in plain)
+            if any(v is None for v in vals):
+                parts.append(f"{q} IS NULL")
+            if parts:
+                clauses.append("(" + " OR ".join(parts) + ")")
+                used[col] = f
+            continue
+        op, value = str(f.get("op") or ""), f.get("value")
+        if op in ("contains", "not_contains") and str(value or "") != "":
+            neg = "NOT " if op == "not_contains" else ""
+            clauses.append(f"CAST({q} AS TEXT) {neg}LIKE ? ESCAPE '\\'")
+            params.append(_like(str(value)))
+            used[col] = f
+        elif op in OPS and str(value or "") != "":
+            # 数として比較できるなら数で、無理なら文字で比べる
+            try:
+                num = float(value)
+                clauses.append(f"CAST({q} AS REAL) {OPS[op]} ?")
+                params.append(num)
+            except (TypeError, ValueError):
+                clauses.append(f"CAST({q} AS TEXT) {OPS[op]} ?")
+                params.append(str(value))
+            used[col] = f
+        elif op == "empty":
+            clauses.append(f"({q} IS NULL OR CAST({q} AS TEXT) = '')")
+            used[col] = f
+        elif op == "not_empty":
+            clauses.append(f"({q} IS NOT NULL AND CAST({q} AS TEXT) <> '')")
+            used[col] = f
+    return (" AND ".join(clauses), params, used)
+
+
 @bp.get("/api/table/rows")
 @login_required
 def rows():
@@ -90,17 +158,21 @@ def rows():
         cols = [r[1] for r in conn.execute(f"PRAGMA table_info({_qi(table)})")]
         if sort and sort not in cols:        # 実在しない列名は SQL に入れない
             sort = ""
-        where, params = "", []
+        conds, params = [], []
         if q:
             # 全列を文字として見て部分一致。数値列も CAST して同じ扱いにする
-            where = " WHERE " + " OR ".join(
-                f"CAST({_qi(c)} AS TEXT) LIKE ? ESCAPE '\\'" for c in cols)
-            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            params = [like] * len(cols)
+            conds.append("(" + " OR ".join(
+                f"CAST({_qi(c)} AS TEXT) LIKE ? ESCAPE '\\'" for c in cols) + ")")
+            params.extend([_like(q)] * len(cols))
+        fsql, fparams, used = _filters_sql(request.args.get("filters") or "", cols)
+        if fsql:
+            conds.append(fsql)
+            params.extend(fparams)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
 
         total = conn.execute(f"SELECT COUNT(*) FROM {_qi(table)}").fetchone()[0]
         matched = (conn.execute(f"SELECT COUNT(*) FROM {_qi(table)}{where}", params).fetchone()[0]
-                   if q else total)
+                   if where else total)
         order = f" ORDER BY {_qi(sort)} {'DESC' if desc else 'ASC'}" if sort else ""
         cur = conn.execute(
             f"SELECT * FROM {_qi(table)}{where}{order} LIMIT ? OFFSET ?", [*params, limit, offset])
@@ -113,4 +185,45 @@ def rows():
     return jsonify({"ok": True, "columns": cols, "rows": jsonable(data),
                     "total": total, "matched": matched,
                     "offset": offset, "limit": limit,
-                    "sort": sort, "dir": "desc" if desc else "asc"})
+                    "sort": sort, "dir": "desc" if desc else "asc",
+                    "filters": used})
+
+
+@bp.get("/api/table/values")
+@login_required
+def values():
+    """1列の値の一覧（Excelのフィルターで出る候補）。多い順に返す。
+
+    種類が多すぎる列（IDなど）は全部返しても選べないので、上限で切って
+    「絞り込んで探す」に誘導する（truncated で画面に伝える）。
+    """
+    path, table, err = _resolve(request.args.get("db") or "", request.args.get("table") or "")
+    if err:
+        return jsonify({"error": err}), 404
+    column = request.args.get("column") or ""
+    q = (request.args.get("q") or "").strip()
+    limit = 300
+
+    conn = db.connect_ro(path)
+    try:
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({_qi(table)})")]
+        if column not in cols:
+            return jsonify({"error": f"列 '{column}' がありません。"}), 404
+        c = _qi(column)
+        where, params = "", []
+        if q:
+            where = f" WHERE CAST({c} AS TEXT) LIKE ? ESCAPE '\\'"
+            params = [_like(q)]
+        kinds = conn.execute(f"SELECT COUNT(DISTINCT {c}) FROM {_qi(table)}").fetchone()[0]
+        cur = conn.execute(
+            f"SELECT {c} AS v, COUNT(*) AS n FROM {_qi(table)}{where} "
+            f"GROUP BY v ORDER BY n DESC, v LIMIT ?", [*params, limit + 1])
+        rows_ = cur.fetchall()
+    except Exception as e:
+        return jsonify({"error": f"値を読めませんでした: {e}"}), 400
+    finally:
+        conn.close()
+
+    truncated = len(rows_) > limit
+    return jsonify({"ok": True, "column": column, "kinds": kinds, "truncated": truncated,
+                    "values": [{"value": jsonable(v), "count": n} for v, n in rows_[:limit]]})

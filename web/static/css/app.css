@@ -447,9 +447,12 @@ table.data tr.is-hit > td { background: var(--accent-weak); }
 .tablewrap { overflow: auto; max-height: 460px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 table.data { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12.5px; }
 table.data th, table.data td {
-    padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left;
+    padding: 6px 10px; text-align: left;
+    /* 列の間にも線を引く。数字が並ぶ表では、横線だけだと目が隣の列へ滑る */
+    border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
     white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis;
 }
+table.data th:last-child, table.data td:last-child { border-right: none; }
 table.data thead th {
     position: sticky; top: 0; z-index: 1; background: var(--surface-2);
     font-weight: 550; color: var(--muted); border-bottom: 1px solid var(--border-2);
@@ -986,6 +989,43 @@ details.acc.is-target {
 
 /* AIの回答の中の注意書き（※ ⚠ で始まる行）。データの信頼性にかかわるので目立たせる */
 .caveat { color: var(--err); font-weight: 600; }
+
+/* --- テーブルビューアの列フィルター（Excelのフィルター相当）------------------- */
+
+.th__inner { display: flex; align-items: center; gap: 4px; }
+.th__name { cursor: pointer; user-select: none; flex: 1; min-width: 0; }
+.th__name:hover { color: var(--text); }
+.th__filter {
+    border: none; background: none; padding: 0 2px; cursor: pointer;
+    color: var(--border-2); display: inline-flex; align-items: center; border-radius: 4px;
+}
+.th__filter:hover { color: var(--text); background: var(--surface); }
+.th__filter.is-on { color: var(--accent); }
+
+/* 絞り込みの一覧（いま何で絞っているか） */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+    background: var(--accent-weak); border: 1px solid var(--border-2);
+    border-radius: 999px; padding: 2px 4px 2px 10px;
+}
+.chip__x { border: none; background: none; cursor: pointer; color: var(--muted);
+           font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 999px; }
+.chip__x:hover { color: var(--err); background: var(--surface); }
+
+/* 列の見出しから開くフィルターの小窓 */
+.colfilter {
+    position: fixed; z-index: 400; width: 300px; padding: 10px;
+    background: var(--surface); border: 1px solid var(--border-2);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+    display: flex; flex-direction: column; gap: 6px;
+}
+.colfilter__head { display: flex; align-items: center; gap: 6px; }
+.colfilter__list { max-height: 260px; overflow: auto; border: 1px solid var(--border);
+                   border-radius: var(--radius-sm); padding: 6px; }
+.colfilter__row { display: flex; align-items: center; gap: 6px; font-size: 12.5px;
+                  padding: 2px 0; cursor: pointer; }
+.colfilter__row:hover { background: var(--surface-2); }
 
 .spinner {
     width: 15px; height: 15px; border: 2px solid var(--border-2);

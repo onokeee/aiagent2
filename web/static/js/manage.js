@@ -396,7 +396,7 @@ function renderHistory(box, list, kinds) {
             ? el('span', { style: 'color:var(--ok)' }, '成功')
             : el('span', { style: 'color:var(--err)' }, '失敗')),
         el('td', {}, (kinds || {})[h.kind] || h.kind),
-        el('td', {}, h.mode === 'append' ? '追記' : '洗い替え'),
+        el('td', {}, h.mode === 'append' ? '追記' : '全件入れ替え'),
         el('td', { class: 'num' }, h.ok ? (h.rows || 0).toLocaleString() : '―'),
         el('td', { class: 'num' }, h.removed ? `-${h.removed.toLocaleString()}` : ''),
         el('td', {}, h.kept === null || h.kept === undefined ? ''

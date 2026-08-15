@@ -111,7 +111,7 @@ def _job_row(j: dict) -> dict:
                 "last_degraded": []}
     return {**defaults, **j,
             "interval_label": jobs.interval_label(j.get("interval_minutes", 0)),
-            "mode_label": "追記" if j.get("mode") == "append" else "洗い替え",
+            "mode_label": "追記" if j.get("mode") == "append" else "全件入れ替え",
             "source_label": importer.display_name(Path(j.get("source", ""))),
             "kept": kept,
             "manual_blocked": jobs.manual_run_blocked(j),
@@ -295,7 +295,7 @@ def run():
                     started, keep=keep)
         return jsonify({"error": f"取り込みに失敗しました: {e}"}), 500
 
-    message = f"{n:,}行を{'追記' if mode == 'append' else '洗い替え'}しました。"
+    message = f"{n:,}行を{'追記' if mode == 'append' else '全件入れ替え'}しました。"
     if mode == "append":
         message += f" 保持 {kept}/{keep}回"
         if removed:
@@ -431,7 +431,7 @@ def job_save():
         "db_file": db_file, "table": importer.safe_name(body.get("table", "")),
         "mode": body.get("mode") or "replace",
         "timestamp_column": (body.get("timestamp_column") or "").strip() or None,
-        # 取得日時は洗い替えでも付ける（いつ時点のデータかを残すため）
+        # 取得日時は全件入れ替えでも付ける（いつ時点のデータかを残すため）
         "keep_runs": body.get("keep_runs"),
         "start_at": (body.get("start_at") or "").strip(),
         "columns": cols,

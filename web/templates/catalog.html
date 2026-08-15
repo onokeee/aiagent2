@@ -316,6 +316,36 @@
     </div>
   </div>
 
+  {% if cat_history %}
+  <div class="card mt" id="catHistory">
+    <div class="card__title">用語集・例文の変更履歴</div>
+    <div class="card__desc">
+      チャットからの登録（全ユーザー可）とこの画面での編集の記録です。新しい順に最大50件。
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>日時</th><th>誰が</th><th>操作</th><th>内容</th><th>経路</th></tr></thead>
+        <tbody>
+        {% for h in cat_history %}
+          <tr>
+            <td class="small">{{ h.at[:16]|replace('T', ' ') }}</td>
+            <td>{{ h.user }}</td>
+            <td>{{ {'add':'新規','update':'変更','remove':'削除'}[h.op] if h.op in ('add','update','remove') else h.op }}</td>
+            <td class="small">{{ h.summary }}
+              {% if h.op == 'update' and h.before and h.after %}
+                <div class="muted">
+                  {{ (h.before.description or h.before.q or '')|truncate(40) }} →
+                  {{ (h.after.description or h.after.q or '')|truncate(40) }}</div>
+              {% endif %}</td>
+            <td class="small muted">{{ 'チャット' if h.source == 'chat' else 'カタログ' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   {# 未保存の変更があるときだけ現れる。どこに何件あるかと、まとめて保存する口 #}
   <div class="savebar hidden" id="savebar">
     <span class="small" id="savebarText"></span>

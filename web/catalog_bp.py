@@ -5,10 +5,11 @@ import inspect
 import re
 from pathlib import Path
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, g, jsonify, render_template, request
 
 import advanced
 import catalog
+import catalog_history
 import charts
 import custom_tools
 import db
@@ -172,6 +173,8 @@ def index():
         builtin=[_builtin_view(t) for t in tools.BUILTIN_TOOLS],
         chart_fields={t: list(charts.required_fields(t)) for t in charts.CHART_TYPES},
         builtin_overrides=meta.get("builtin_tools") or {},
+        cat_history=[{**r, "summary": catalog_history.summarize(r)}
+                     for r in catalog_history.recent(50)],
         llm_ready=llm.is_configured(),
     )
 
@@ -406,6 +409,10 @@ def save_glossary():
         sql = (row.get("sql") or "").strip()
         if term and (desc or sql):
             gl[term] = {"description": desc, "sql": sql}
+    # 誰が何を変えたかを残す（チャットからの登録と同じ記録に揃える）
+    before_gl = (catalog.table_glossary(meta, body["table"]) if body.get("table")
+                 else catalog.db_glossary(meta))
+    _log_glossary_diff(path.name, body.get("table") or None, before_gl, gl)
     if body.get("table"):
         catalog.set_table_glossary(meta, body["table"], gl)
     elif gl:
@@ -841,17 +848,53 @@ def er_usage():
     return jsonify(sqlusage.usage_for(db.alias_for(path)))
 
 
+def _log_glossary_diff(db_file: str, table, before: dict, after: dict) -> None:
+    """用語集の一括保存を、用語ごとの差分にして履歴へ。"""
+    user = getattr(g.user, "username", None)
+    for term in after:
+        if term not in before:
+            catalog_history.add("glossary", "add", db_file, term, user=user,
+                                table=table, after=after[term], source="catalog")
+        elif before[term] != after[term]:
+            catalog_history.add("glossary", "update", db_file, term, user=user,
+                                table=table, before=before[term],
+                                after=after[term], source="catalog")
+    for term in before:
+        if term not in after:
+            catalog_history.add("glossary", "remove", db_file, term, user=user,
+                                table=table, before=before[term], source="catalog")
+
+
 @bp.post("/api/catalog/examples")
 @admin_required
 def save_examples():
     body = request.json or {}
     path = db.path_for(body["db"])
     meta = catalog.load_meta(path)
-    before = [e for e in (body.get("examples") or [])
-              if str(e.get("q", "")).strip() and str(e.get("sql", "")).strip()]
-    meta["examples"] = catalog.dedupe_examples(before)
+    incoming = [e for e in (body.get("examples") or [])
+                if str(e.get("q", "")).strip() and str(e.get("sql", "")).strip()]
+    new = catalog.dedupe_examples(incoming)
+
+    # 差分をSQLをキーに取り、誰が何を変えたかを残す
+    user = getattr(g.user, "username", None)
+    old_by_sql = {e.get("sql"): e for e in (meta.get("examples") or [])}
+    new_by_sql = {e.get("sql"): e for e in new}
+    for s_, e_ in new_by_sql.items():
+        if s_ not in old_by_sql:
+            catalog_history.add("example", "add", path.name, e_.get("q", ""),
+                                user=user, after=e_, source="catalog")
+        elif old_by_sql[s_] != e_:
+            catalog_history.add("example", "update", path.name, e_.get("q", ""),
+                                user=user, before=old_by_sql[s_], after=e_,
+                                source="catalog")
+    for s_, e_ in old_by_sql.items():
+        if s_ not in new_by_sql:
+            catalog_history.add("example", "remove", path.name, e_.get("q", ""),
+                                user=user, before=e_, source="catalog")
+
+    meta["examples"] = new
     catalog.save_meta(path, meta)
-    dropped = len(before) - len(meta["examples"])
+    dropped = len(incoming) - len(meta["examples"])
     return jsonify({"ok": True, "dropped": dropped,
                     "examples": meta["examples"]})
 

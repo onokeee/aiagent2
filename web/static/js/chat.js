@@ -292,9 +292,10 @@ function openErModal(item) {
     }, true);
 }
 
-/* 用語の登録カード。AIは提案まで。書き込みはこのボタン（管理者）だけ。 */
+/* 用語の登録カード。AIは提案まで。書き込みはボタンを押したときだけ。
+   SQLや置き場所は出さない。代わりに「どう数えるか」の日本語と実データの件数で、
+   SQLを読めない人でも正しさを判断できるようにする。 */
 function glossaryCard(item) {
-    const where = item.table ? `${item.db} の ${item.table}` : `${item.db}（DB全体）`;
     const card = el('div', { class: 'mailcard' });
     const row = (label, value) => value ? el('div', { class: 'mailcard__row' },
         el('span', { class: 'mailcard__label' }, label),
@@ -303,15 +304,17 @@ function glossaryCard(item) {
     card.append(el('div', { class: 'mailcard__head' },
         icon('catalog', 'icon--sm'), el('b', {}, '用語集への登録の提案'),
         el('div', { class: 'spacer' }),
-        item.exists ? el('span', { class: 'badge badge--warn' }, '既存の定義を上書き') : null));
-    card.append(
-        row('用語', item.term),
-        row('説明', item.description),
-        item.sql ? el('div', { class: 'mailcard__row' },
-            el('span', { class: 'mailcard__label' }, 'SQL式'),
-            el('code', { class: 'grow mono' }, item.sql)) : null,
-        row('置き場所', where),
-        item.verdict ? row('検証', `${item.verdict}: ${item.detail || ''}`) : null);
+        el('span', { class: 'badge' + (item.exists ? ' badge--warn' : ' badge--ok') },
+            item.exists ? '既存の定義を変更' : '新規登録')));
+    [row('用語', item.term),
+     row('意味', item.description),
+     row('どう数えるか', item.how),
+     item.detail ? row('実データで確認', item.detail) : null,
+     item.exists && item.old ? el('div', { class: 'mailcard__row' },
+         el('span', { class: 'mailcard__label' }, '変更前'),
+         el('span', { class: 'grow small muted' },
+             item.old.description || '', item.old.sql ? '（式あり）' : '')) : null,
+    ].filter(Boolean).forEach(x => card.append(x));
 
     const btn = el('button', { class: 'btn btn--primary btn--sm', onclick: async () => {
         btn.disabled = true;
@@ -325,7 +328,49 @@ function glossaryCard(item) {
     } }, '用語集に登録');
     card.append(el('div', { class: 'mailcard__row', style: 'justify-content:flex-end' },
         el('span', { class: 'small muted grow' },
-            '登録すると全員のAIがこの定義に従います。内容を確かめてから押してください。'),
+            '登録すると全員のAIがこの定義に従います。登録した人と変更の記録は残ります。'),
+        btn));
+    return card;
+}
+
+/* 例文の登録カード。SQLは出さず、「何をどう集計したか」と実データの先頭数行を見せる。 */
+function exampleCard(item) {
+    const card = el('div', { class: 'mailcard' });
+    const row = (label, value) => value ? el('div', { class: 'mailcard__row' },
+        el('span', { class: 'mailcard__label' }, label),
+        el('span', { class: 'grow' }, value)) : null;
+
+    card.append(el('div', { class: 'mailcard__head' },
+        icon('catalog', 'icon--sm'), el('b', {}, '例文への登録の提案'),
+        el('div', { class: 'spacer' }),
+        el('span', { class: 'badge' + (item.exists ? ' badge--warn' : ' badge--ok') },
+            item.exists ? '既存の例文を更新' : '新規登録')));
+    [row('質問', item.question),
+     row('何をしたか', item.summary),
+     item.exists && item.old_q && item.old_q !== item.question
+         ? row('変更前の質問', item.old_q) : null,
+    ].filter(Boolean).forEach(x => card.append(x));
+
+    if ((item.rows || []).length) {
+        card.append(el('div', { class: 'mailcard__row' },
+            el('span', { class: 'mailcard__label' }, '実データ'),
+            el('div', { class: 'grow' },
+                dataTable(item.columns || [], item.rows || [],
+                    { caption: `全 ${Number(item.total || 0).toLocaleString()} 件中 先頭 ${item.rows.length} 行` }))));
+    }
+
+    const btn = el('button', { class: 'btn btn--primary btn--sm', onclick: async () => {
+        btn.disabled = true;
+        try {
+            const r = await api('/api/chat/save-example', {
+                question: item.question, sql: item.sql, description: item.summary });
+            toast(r.message, 'ok', 8000);
+            btn.textContent = '登録済み';
+        } catch (e) { toast(e.message, 'err', 8000); btn.disabled = false; }
+    } }, '例文として登録');
+    card.append(el('div', { class: 'mailcard__row', style: 'justify-content:flex-end' },
+        el('span', { class: 'small muted grow' },
+            '登録すると似た質問へのAIのお手本になります。登録した人と変更の記録は残ります。'),
         btn));
     return card;
 }
@@ -348,18 +393,15 @@ function addItem(item) {
         if (item.question || links) {
             const foot = el('div', { class: 'toolblock__foot' });
             if (item.question) {
+                // 直接保存ではなくAIに頼む。AIが内容の日本語説明と実データ付きの
+                // 登録カードを出し、そこで確定する（何が登録されるか見えるように）
                 foot.append(el('button', {
                     class: 'btn btn--sm',
-                    onclick: async ev => {
-                        try {
-                            const r = await api('/api/chat/save-example',
-                                { question: item.question, sql: item.sql });
-                            // 既に同じSQLがあった場合は「追加した」と言わない
-                            toast(r.message, r.added ? 'ok' : 'warn', 7000);
-                            ev.target.disabled = true;
-                        } catch (e) { toast(e.message, 'err'); }
+                    onclick: ev => {
+                        ev.target.disabled = true;
+                        send(`「${item.question}」の回答に使ったSQLを、そのまま例文として登録してください。`);
                     },
-                }, 'この質問とSQLを例文として保存'));
+                }, 'この質問と答え方を例文にする'));
             }
             if (links) foot.append(links);
             block.append(foot);
@@ -398,6 +440,8 @@ function addItem(item) {
         });
     } else if (item.kind === 'glossary_term') {
         body.append(glossaryCard(item));
+    } else if (item.kind === 'example_proposal') {
+        body.append(exampleCard(item));
     } else if (item.kind === 'er') {
         body.append(erCard(item));
     } else if (item.kind === 'report') {

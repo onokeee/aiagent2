@@ -17,6 +17,7 @@ from flask import (Blueprint, Response, g, jsonify, render_template, request,
                    session, stream_with_context)
 
 import catalog
+import catalog_history
 import chats
 import config
 import custom_tools
@@ -65,6 +66,7 @@ TOOL_LABELS = {
     "compose_email": "メールの下書き",
     "analyze_usage": "利用状況の分析",
     "propose_glossary_term": "用語登録の提案",
+    "propose_example": "例文登録の提案",
 }
 
 
@@ -878,13 +880,14 @@ def mail_test():
 
 
 @bp.post("/api/chat/glossary-save")
-@admin_required
+@login_required
 def glossary_save():
     """チャットの登録カードから、用語をカタログの用語集へ保存する。
 
     AIは propose_glossary_term でカードを出すところまで。書き込みはこの
-    エンドポイントだけで、押したのが管理者であることが唯一の前提
-    （カタログを書き換えるので ⭐例文保存と同じ扱い）。
+    エンドポイントだけで、カードのボタンを押したときに起こる。
+    一般ユーザーも登録できる（カタログを皆で育てる）。その代わり、
+    誰がいつ何を変えたかを catalog_history に必ず残す。
     """
     body = request.json or {}
     term = (body.get("term") or "").strip()
@@ -902,32 +905,37 @@ def glossary_save():
     entry = {"description": desc, "sql": sql}
     if table:
         gl = catalog.table_glossary(meta, table)      # 既存の用語を消さずに足す
-        replaced = term in gl
+        old = gl.get(term)
         gl[term] = entry
         catalog.set_table_glossary(meta, table, gl)
     else:
         gl = catalog.db_glossary(meta)
-        replaced = term in gl
+        old = gl.get(term)
         gl[term] = entry
         meta["glossary"] = gl
     catalog.save_meta(path, meta)
+    catalog_history.add("glossary", "update" if old else "add", path.name, term,
+                        user=g.user.username, table=table or None,
+                        before=old, after=entry, source="chat")
     where = f"{path.name} の {table}" if table else f"{path.name}（DB全体）"
     return jsonify({"ok": True,
                     "message": f"「{term}」を {where} の用語集に"
-                               f"{'上書き登録' if replaced else '登録'}しました。"
+                               f"{'上書き登録' if old else '登録'}しました。"
                                "次の質問からAIがこの定義に従います。"})
 
 
 @bp.post("/api/chat/save-example")
-@admin_required
+@login_required
 def save_example():
-    """正しかったSQLをカタログの例文へ還流する。
+    """チャットの登録カードから、例文をカタログへ保存する。
 
-    チャット画面から呼ぶがカタログを書き換えるので、カタログ画面と同じく管理者のみ。
+    一般ユーザーも登録できる（カタログを皆で育てる）。誰がいつ何を変えたかは
+    catalog_history に必ず残す。同じSQLの例文が既にあれば、質問文と説明を更新する。
     """
     scope = build_scope({f.name: [] for f in db.list_db_files()})
     q = (request.json.get("question") or "").strip()
     sql = (request.json.get("sql") or "").strip()
+    desc = (request.json.get("description") or "").strip()
     if not q or not sql:
         return jsonify({"error": "質問とSQLの両方が必要です。"}), 400
 
@@ -945,20 +953,36 @@ def save_example():
     meta = catalog.load_meta(p)
     examples = meta.get("examples") or []
 
-    # 同じSQLが既にあるなら足さない。例文は毎回プロンプトに載るので、
-    # 言い回し違いで同じSQLが並ぶとトークンを食うだけで精度は上がらない。
+    # 同じSQLが既にあれば、増やさずにその1件の質問文・説明を更新する。
+    # 例文は毎回プロンプトに載るので、言い回し違いで同じSQLが並ぶと
+    # トークンを食うだけで精度は上がらない。
     same = catalog.find_example(examples, sql)
     if same is not None:
-        return jsonify({"ok": True, "added": False,
-                        "message": f"{p.name} に同じSQLの例文が既にあります"
-                                   f"（「{same['q']}」）。登録は増やしませんでした。"})
+        before = dict(same)
+        same["q"] = q
+        if desc:
+            same["description"] = desc
+        meta["examples"] = catalog.dedupe_examples(examples)
+        catalog.save_meta(p, meta)
+        catalog_history.add("example", "update", p.name, q,
+                            user=g.user.username, before=before,
+                            after={k: same.get(k) for k in ("q", "description", "sql")},
+                            source="chat")
+        return jsonify({"ok": True, "added": False, "updated": True,
+                        "message": f"{p.name} に同じSQLの例文があったため、"
+                                   f"質問文を「{q}」に更新しました。"})
     if len(examples) >= catalog.EXAMPLES_MAX:
         return jsonify({"error": f"{p.name} の例文は{catalog.EXAMPLES_MAX}件までです。"
                                  "データカタログの「質問とSQLの例文」で古いものを"
                                  "整理してください。"}), 400
 
-    meta["examples"] = catalog.dedupe_examples([*examples, {"q": q, "sql": sql}])
+    new_entry = {"q": q, "sql": sql}
+    if desc:
+        new_entry["description"] = desc
+    meta["examples"] = catalog.dedupe_examples([*examples, new_entry])
     catalog.save_meta(p, meta)
+    catalog_history.add("example", "add", p.name, q, user=g.user.username,
+                        after=new_entry, source="chat")
     others = [s["name"] for s in hits[1:]]
     message = f"{p.name} の例文に追加しました。"
     if others:

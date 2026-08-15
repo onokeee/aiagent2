@@ -1337,13 +1337,49 @@ BUILTIN_TOOLS = [
                             "description": "SQLの条件式・計算式（任意）。"
                                            "例: orders.status != '9' AND orders.kbn = '1'。"
                                            "会話で実際に使って正しかった式を入れる。"},
+                    "how": {"type": "string",
+                            "description": "どのデータをどこから取り、どう絞る/計算するのかを、"
+                                           "SQLを知らない人に伝わる日本語で書く。テーブルや列は"
+                                           "業務の言葉で呼ぶ。例:「受注データから、キャンセル(9)"
+                                           "以外で取引区分が通常(1)の行を数える」。必須。"},
                     "table": {"type": "string",
                               "description": "用語を置くテーブル。その用語が主に関わるテーブル名。"
                                              "複数テーブルにまたがる用語のときは省略し db を指定。"},
                     "db": {"type": "string",
                            "description": "DB全体の用語にするときのDBファイル名（例: demo_sales.db）。"},
                 },
-                "required": ["term", "description"],
+                "required": ["term", "description", "how"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_example",
+            "description": (
+                "いまの質問と実行済みSQLを「例文」としてカタログに登録する登録カードを出す。"
+                "例文はAIのお手本になり、似た質問への精度が上がる。"
+                "実際に登録するかはユーザーがカードのボタンで決める。"
+                "\n使いどころ:"
+                "\n- ユーザーが「これを例文にして」「この答えを覚えて」と言ったとき"
+                "\n- ユーザーが回答を「合っている」と認め、その質問が今後もよく出そうなとき"
+                "\nsql には、この会話で実際に実行して正しかったSQLをそのまま入れる（書き直さない）。"
+                "毎回は提案しない。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string",
+                                 "description": "ユーザーの質問文（言い回しを変えない）。"},
+                    "sql": {"type": "string",
+                            "description": "実行して正しかったSELECT文そのまま。"},
+                    "summary": {"type": "string",
+                                "description": "どのデータをどこから取り、どう集計したかを、"
+                                               "SQLを知らない人に伝わる日本語で。"
+                                               "例:「受注データと顧客マスタをつなぎ、"
+                                               "ランクごとに売上金額を合計した」。"},
+                },
+                "required": ["question", "sql", "summary"],
             },
         },
     },

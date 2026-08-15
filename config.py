@@ -88,6 +88,12 @@ IMPORT_HISTORY_MAX = int(os.getenv("IMPORT_HISTORY_MAX", "5000") or 5000)
 # 画面のテーブル詳細に出すサンプル行数
 IMPORT_SAMPLE_ROWS = int(os.getenv("IMPORT_SAMPLE_ROWS", "20") or 20)
 
+# --- カタログの変更履歴 -------------------------------------------------------
+# 用語集・例文を誰がいつ変えたかの記録（チャットからの登録・カタログ画面の編集の両方）。
+CATALOG_HISTORY_FILE = Path(os.getenv("CATALOG_HISTORY_FILE",
+                                      str(DATA_DIR / "catalog_history.jsonl"))).expanduser()
+CATALOG_HISTORY_MAX = int(os.getenv("CATALOG_HISTORY_MAX", "2000") or 2000)
+
 # --- メール送信（SMTP） -------------------------------------------------------
 # ここの値は「初期値」で、画面（メール設定）から保存すると上書きされる。
 #

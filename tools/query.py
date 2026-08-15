@@ -11,7 +11,7 @@ import config
 import excel
 import exports
 from . import results
-from .common import _err, _json, _report_result, fetch, source_note
+from .common import _err, _json, _report_result, _total_rows, fetch, source_note
 from .schemas import _CHART_TOOLS
 
 
@@ -326,20 +326,79 @@ def _propose_glossary_term(args: dict, scope: list[dict]) -> dict:
                 return _err(f"SQL式が実データで通りませんでした: {str(e).splitlines()[0][:120]} "
                             "式を直して提案し直すか、SQL式なし（説明だけ）で提案してください。")
 
-    exists = term in catalog.table_glossary(catalog.load_meta(target), table) if table         else term in catalog.db_glossary(catalog.load_meta(target))
+    meta_now = catalog.load_meta(target)
+    current = (catalog.table_glossary(meta_now, table) if table
+               else catalog.db_glossary(meta_now)).get(term)
     return {
         "ok": True,
         "llm_content": _json({
             "status": "proposed", "db": target.name, "table": table or "(DB全体)",
             "term": term, "verdict": verdict or "説明のみ", "detail": detail,
-            "already_exists": exists,
+            "already_exists": current is not None,
             "note": "登録カードをユーザーの画面に出しました。登録するかはユーザーが"
                     "カードのボタンで決めます。あなたはこれ以上の操作をしなくてよい。",
         }),
         "render": {"role": "assistant", "kind": "glossary_term",
                    "db": target.name, "table": table, "term": term,
                    "description": desc, "sql": sql,
-                   "verdict": verdict, "detail": detail, "exists": exists},
+                   "how": str(args.get("how") or "").strip(),
+                   "verdict": verdict, "detail": detail,
+                   "exists": current is not None,
+                   "old": current or None},
+    }
+
+
+def _propose_example(args: dict, scope: list[dict]) -> dict:
+    """例文（質問とSQLのペア）の登録カードをチャットに出す。保存は人がボタンで確定。
+
+    カードにはSQLは出さない。代わりに「どのデータをどこから取って、どう集計したか」の
+    日本語（summary。AIが書く）と、実際に動かした結果の先頭数行を載せる。
+    SQLを読めない人でも、中身を見て正しさを判断できるようにするため。
+    """
+    import db as dbmod
+
+    q = str(args.get("question") or "").strip()
+    sql = str(args.get("sql") or "").strip()
+    summary = str(args.get("summary") or "").strip()
+    if not q or not sql or not summary:
+        return _err("question（質問文）・sql・summary（何をどう集計したかの日本語）は必須です。")
+
+    wide = dbmod.widen_scope(sql, scope)
+    try:
+        columns, rows, truncated = dbmod.run_select(sql, wide, max_rows=5)
+    except Exception as e:
+        return _err(f"SQLが実データで通りませんでした: {str(e).splitlines()[0][:120]} "
+                    "実際に成功したSQLをそのまま渡してください。")
+    total = _total_rows(sql, wide) if truncated else len(rows)
+
+    # 置き場のDB = SQLが最初に名指ししているDB（例文はDBごとのファイルに残る）
+    hits = []
+    import re as _re
+    for f in dbmod.list_db_files():
+        m = _re.search(r'(?<![\w."])' + _re.escape(dbmod.alias_for(f)) + r"\s*\.",
+                       sql, _re.IGNORECASE)
+        if m:
+            hits.append((m.start(), f))
+    hits.sort(key=lambda t: t[0])
+    home = hits[0][1] if hits else (Path(scope[0]["path"]) if len(scope) == 1 else None)
+    if home is None:
+        return _err("このSQLがどのDBのものか判断できませんでした。"
+                    "テーブル名を『DB名.テーブル名』の形で書いたSQLを渡してください。")
+
+    same = catalog.find_example(catalog.load_meta(home).get("examples") or [], sql)
+    return {
+        "ok": True,
+        "llm_content": _json({
+            "status": "proposed", "db": home.name, "question": q,
+            "already_exists": same is not None,
+            "note": "登録カードをユーザーの画面に出しました。登録するかはユーザーが"
+                    "カードのボタンで決めます。あなたはこれ以上の操作をしなくてよい。",
+        }),
+        "render": {"role": "assistant", "kind": "example_proposal",
+                   "db": home.name, "question": q, "sql": sql, "summary": summary,
+                   "columns": columns, "rows": [list(r) for r in rows],
+                   "total": total, "exists": same is not None,
+                   "old_q": (same or {}).get("q", "")},
     }
 
 
@@ -553,6 +612,7 @@ HANDLERS = {
     "describe_table": _describe_table,
     "show_er_diagram": _show_er_diagram,
     "propose_glossary_term": _propose_glossary_term,
+    "propose_example": _propose_example,
     "pivot_table": _pivot_table,
     "analyze_stats": _analyze_stats,
     "plot_chart": _plot_chart,
@@ -563,10 +623,6 @@ HANDLERS = {
     "export_csv": _export_csv,
     "export_text": _export_text,
 }
-
-# カタログへの書き込みを提案するツール。保存の確定ボタンは管理者にしか
-# 効かない(⭐例文保存と同じ)ので、ツール自体も管理者にだけ渡す。
-ADMIN_TOOLS = {"propose_glossary_term"}
 
 # SQLを受け取るツール（実行前プレビュー表示の対象）
 SQL_TOOLS = {"run_sql_query", "plot_chart", "plot_dual_axis", "pivot_table",

@@ -241,7 +241,9 @@ AUTH_API_USER_FIELD = os.getenv("AUTH_API_USER_FIELD", "username").strip()
 AUTH_API_PASS_FIELD = os.getenv("AUTH_API_PASS_FIELD", "password").strip()
 AUTH_API_SUCCESS_FIELD = os.getenv("AUTH_API_SUCCESS_FIELD", "").strip()
 AUTH_API_DISPLAY_FIELD = os.getenv("AUTH_API_DISPLAY_FIELD", "display_name").strip()
-AUTH_API_GROUPS_FIELD = os.getenv("AUTH_API_GROUPS_FIELD", "groups").strip()
+# 応答のどこにグループ一覧があるか。グループを返さないAPIでは空のままにする
+# （空なら全員が一般ユーザーになり、管理者は ADMIN_PASS の admin だけになる）。
+AUTH_API_GROUPS_FIELD = os.getenv("AUTH_API_GROUPS_FIELD", "").strip()
 AUTH_API_TIMEOUT = int(os.getenv("AUTH_API_TIMEOUT", "10") or 10)
 
 # ユーザーごとのカタログ／チャット履歴の置き場所（data/users/<ユーザー名>/）

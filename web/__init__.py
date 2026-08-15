@@ -15,6 +15,7 @@ import secrets
 
 from flask import Flask
 
+import auth
 import config
 import scheduler
 
@@ -35,6 +36,35 @@ def _secret_key() -> str:
     except OSError:
         pass
     return key
+
+
+def _warn_if_no_admin() -> None:
+    """管理者が1人も居ない設定なら、起動時に知らせる。
+
+    認証APIがグループを返さない構成では、管理者になれるのは env の ADMIN_PASS で
+    入る admin だけになる。これを設定し忘れると、カタログ・取り込み・モデル・メールの
+    画面に誰も入れないまま動き続ける。気づけるのは「設定を直したいとき」なので、
+    起動時に言う。
+    """
+    if auth.admin_enabled():
+        return
+    try:
+        provider = auth.get_provider()
+    except auth.AuthError:
+        return
+    if provider.name == "local":
+        has_admin = any(config.AUTH_ADMIN_GROUP in (u.get("groups") or [])
+                        for u in (auth.load_users_file().get("users") or []))
+        if has_admin:
+            return
+        how = "manage_users.py add <ユーザー名> --admin で管理者を作るか、"
+    else:
+        # 認証APIがグループを返さないなら、ここに来た時点で管理者は現れない
+        how = f"認証APIが '{config.AUTH_ADMIN_GROUP}' グループを返すようにするか、"
+    print(f"[auth] 警告: 管理者が1人も居ません。{how}"
+          "env の ADMIN_PASS を設定してください。"
+          "このままではデータカタログ・データ取り込み・モデル設定・メール設定を"
+          "誰も開けません（チャットは使えます）。")
 
 
 def create_app() -> Flask:
@@ -63,6 +93,8 @@ def create_app() -> Flask:
     from .helpers import inject_globals, load_user_into_context
     app.before_request(load_user_into_context)
     app.context_processor(inject_globals)
+
+    _warn_if_no_admin()
 
     @app.after_request
     def _no_html_cache(res):

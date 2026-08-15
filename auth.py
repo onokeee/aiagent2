@@ -189,15 +189,18 @@ class HttpApiAuthProvider(AuthProvider):
         elif status != 200:
             return None
 
-        groups = _dig(data, config.AUTH_API_GROUPS_FIELD) or []
-        if isinstance(groups, str):
-            groups = [groups]
-        groups = [str(g) for g in groups]
+        # グループを返さない認証APIは珍しくない。その場合は全員を一般ユーザーとして扱う
+        # （管理者は env の ADMIN_PASS で入る admin だけになる）。
+        # 応答に無いものを推測して管理者にするのは危険なので、迷ったら一般にする。
+        groups = []
+        if config.AUTH_API_GROUPS_FIELD:
+            raw = _dig(data, config.AUTH_API_GROUPS_FIELD) or []
+            groups = [str(g) for g in ([raw] if isinstance(raw, str) else raw)]
         return User(
             username=str(_dig(data, config.AUTH_API_USER_FIELD) or username),
             display_name=str(_dig(data, config.AUTH_API_DISPLAY_FIELD) or ""),
             groups=groups,
-            is_admin=config.AUTH_ADMIN_GROUP in groups,
+            is_admin=bool(config.AUTH_ADMIN_GROUP) and config.AUTH_ADMIN_GROUP in groups,
         )
 
 

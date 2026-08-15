@@ -491,8 +491,46 @@ const ER = (() => {
             // 関連の変更はサーバに保存されるので「元に戻す」（配置の取り消し）の対象外。
             // 消した関連はもう一度つなぎ直す、多重度は押し直す、で戻す。
             const r = await api('/api/catalog/relationship', { db: CAT.db, ...body });
+            // 実データを見て「結ぶべきでない／要確認」と判定されたら、理由を出して止める
+            if (r.check) { showLinkCheck(r, body); return; }
             applyEr(r.er); closePanel();
         } catch (e) { toast(e.message, 'err'); }
+    }
+
+    /* 線を引いた先が結べない／結ぶべきでないときのパネル。
+       なぜだめかを実データの数字つきで並べる。警告どまりなら「それでも登録する」を出す。
+       ER図の線は「この列で JOIN してよい」というAIへの指示なので、成立しない線を
+       黙って登録させない。 */
+    function showLinkCheck(r, body) {
+        const check = r.check;
+        const blocked = check.level === 'block';
+        const LV = { block: ['alert--err', '結べません'],
+                     warn:  ['alert--warn', '確認してください'],
+                     info:  ['alert--info', '参考'] };
+        const items = check.issues.map(i => {
+            const [cls, label] = LV[i.level] || LV.info;
+            return el('div', { class: `alert ${cls} small`, style: 'margin:6px 0' },
+                el('div', {}, el('b', {}, i.title), ' ', el('span', { class: 'muted' }, `（${label}）`)),
+                el('div', { style: 'margin-top:3px' }, i.detail));
+        });
+        const buttons = el('div', { class: 'row mt', style: 'gap:8px;justify-content:flex-end' },
+            el('button', { class: 'btn btn--sm', onclick: closePanel }, blocked ? '閉じる' : 'やめる'),
+            blocked ? null
+                    : el('button', { class: 'btn btn--sm btn--primary',
+                                     onclick: () => mutate({ ...body, force: true }) },
+                         'それでも登録する'));
+        showPanel(blocked ? 'この線は結べません' : 'この線でよいですか？', [
+            el('div', { class: 'small mono mb' }, `${r.from} → ${r.to}（${r.cardinality}）`),
+            el('div', { class: 'small muted' },
+                blocked
+                    ? '実データを見ると、この2列で JOIN しても結果が出ません。列の選び間違いです。'
+                    : '実データを見ると気になる点があります。意味を確かめてから登録してください。'),
+            ...items,
+            el('div', { class: 'small muted mt' },
+                'ER図の線は「この列で結合してよい」というAIへの指示です。' +
+                '成立しない線を引くと、AIが自信を持って間違った結合を書くようになります。'),
+            buttons,
+        ], { wide: true });
     }
 
     /* --- 操作 ------------------------------------------------------------------ */

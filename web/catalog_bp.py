@@ -263,6 +263,17 @@ def relationship():
         new = {"from": _ref(a, alias), "to": _ref(b, alias), "cardinality": card}
         if any(r.get("from") == new["from"] and r.get("to") == new["to"] for r in rels):
             return jsonify({"error": "この関連はすでに登録されています。"}), 400
+
+        # 結んでよい列か、実データを見て確かめる。
+        #   block … 保存しない（値が全く重ならない等。JOINが成立しない線をAIに教えない）
+        #   warn  … 理由を返して止める。人が確認して force=true で送り直せば保存する
+        def _path_of(al):
+            return next((f for f in db.list_db_files() if db.alias_for(f) == al), path)
+        check = catalog.link_check(a, b, lookup, _path_of)
+        if check["level"] == "block" or (check["level"] == "warn" and not body.get("force")):
+            # 200 で返す: 画面の api() は非2xxだと本文を捨てて例外にするため
+            return jsonify({"ok": False, "check": check,
+                            "from": new["from"], "to": new["to"], "cardinality": card})
         rels.append(new)
     elif action in ("update", "delete"):
         i = int(body.get("index", -1))

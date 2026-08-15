@@ -788,6 +788,139 @@ def normalize_direction(a: tuple, b: tuple, cardinality: str, lookup) -> tuple:
     return a, b, card
 
 
+def _sample_values(profile: dict, table: str, column: str) -> list:
+    """プロファイルに残っている実値（あれば）。警告文に例として添える用。"""
+    st = ((profile or {}).get("tables", {}).get(table) or {}).get("col_stats", {}).get(column) or {}
+    vals = st.get("values") or []
+    return [v[0] if isinstance(v, (list, tuple)) else v for v in vals]
+
+
+def link_check(child: tuple, parent: tuple, lookup, path_of) -> dict:
+    """この2列を関連として結んでよいかを、実データを見て判定する。
+
+    child / parent は (alias, table, column)。normalize_direction を通した後の向き。
+    lookup(alias) は (profile, meta)、path_of(alias) は DBファイルのパスを返す。
+
+    戻り値: {"level": "ok" | "warn" | "block", "issues": [{level, title, detail}]}
+      block … 結んではいけない（値が全く重ならない等）。保存しない
+      warn  … 結べるが、意味を確かめてほしい（型が違う・親が一意でない等）。確認して保存
+      ok    … 問題なし
+
+    なぜ止めるかを人が読める形で必ず添える。ER図の線は「この列で JOIN してよい」という
+    AIへの指示なので、実データで JOIN が成立しない線を引くと、AIが自信を持って
+    間違った結合を書くようになる。
+    """
+    issues: list[dict] = []
+    ca, ct, cc = child
+    pa, pt, pc = parent
+
+    def add(level, title, detail):
+        issues.append({"level": level, "title": title, "detail": detail})
+
+    # --- カタログ上の情報（プロファイル）で分かること ---------------------------------
+    prof_c, meta_c = lookup(ca)
+    prof_p, meta_p = lookup(pa)
+    col_c = next((c for c in (prof_c["tables"].get(ct) or {}).get("columns", [])
+                  if c["name"] == cc), {}) if prof_c else {}
+    col_p = next((c for c in (prof_p["tables"].get(pt) or {}).get("columns", [])
+                  if c["name"] == pc), {}) if prof_p else {}
+    type_c = str(col_c.get("type") or "").upper()
+    type_p = str(col_p.get("type") or "").upper()
+
+    def kind(t):
+        if any(k in t for k in ("INT",)):
+            return "整数"
+        if any(k in t for k in ("REAL", "FLOA", "DOUB", "NUM", "DEC")):
+            return "小数"
+        if any(k in t for k in ("CHAR", "TEXT", "CLOB")):
+            return "文字"
+        if "DATE" in t or "TIME" in t:
+            return "日時"
+        return t or "不明"
+
+    if type_c and type_p and kind(type_c) != kind(type_p):
+        add("warn", "型が違います",
+            f"{ct}.{cc} は {type_c}（{kind(type_c)}）、{pt}.{pc} は {type_p}（{kind(type_p)}）です。"
+            "SQLite は型が違っても比較できてしまいますが、たいてい別の意味の列です"
+            "（例: 数値のIDと文字のコード）。本当に同じものを指すか確かめてください。")
+
+    pk_c = set(effective_pk(prof_c, meta_c, ct)[0]) if prof_c else set()
+    pk_p = set(effective_pk(prof_p, meta_p, pt)[0]) if prof_p else set()
+    if cc in pk_c and pk_c == {cc} and pc in pk_p and pk_p == {pc} and (ct != pt or ca != pa):
+        add("warn", "主キー同士を結んでいます",
+            f"{ct}.{cc} も {pt}.{pc} もそれぞれのテーブルの主キーです。"
+            "1対1の関連（同じIDを持つ2つのテーブル）なら正しいですが、"
+            "「たまたま両方IDという名前」なら結ぶべきではありません。")
+
+    # --- 実データで分かること（読み取り専用で数える） ---------------------------------
+    try:
+        pc_path, pp_path = path_of(ca), path_of(pa)
+        conn = db.connect_scope([(pc_path, "c"), (pp_path, "p")] if pc_path != pp_path
+                                else [(pc_path, "c")])
+        pal = "c" if pc_path == pp_path else "p"
+        q = lambda s: '"' + str(s).replace('"', '""') + '"'
+        C = f'"c".{q(ct)}', q(cc)
+        P = f'"{pal}".{q(pt)}', q(pc)
+
+        n_child = conn.execute(f"SELECT COUNT(*) FROM {C[0]} WHERE {C[1]} IS NOT NULL").fetchone()[0]
+        n_parent = conn.execute(f"SELECT COUNT(*) FROM {P[0]} WHERE {P[1]} IS NOT NULL").fetchone()[0]
+        n_parent_distinct = conn.execute(
+            f"SELECT COUNT(DISTINCT {P[1]}) FROM {P[0]} WHERE {P[1]} IS NOT NULL").fetchone()[0]
+        # 子の値のうち親に存在するもの / しないもの
+        matched = conn.execute(
+            f"SELECT COUNT(*) FROM {C[0]} c0 WHERE c0.{C[1]} IS NOT NULL "
+            f"AND EXISTS (SELECT 1 FROM {P[0]} p0 WHERE p0.{P[1]} = c0.{C[1]})").fetchone()[0]
+        # 子の「異なる値」の数と、親の値のうち子から参照されている数（親側のカバー率）。
+        # 「status(1,2,3,9) → product_id(1〜40)」のような偶然の一致は、子の値は全部
+        # 親に見つかるのに、親の値はほとんど参照されない。本物の外部キーなら親の多くが
+        # 参照される。値の一致だけでは見抜けないので、この角度を足す。
+        n_child_distinct = conn.execute(
+            f"SELECT COUNT(DISTINCT {C[1]}) FROM {C[0]} WHERE {C[1]} IS NOT NULL").fetchone()[0]
+        parent_hit = conn.execute(
+            f"SELECT COUNT(DISTINCT p0.{P[1]}) FROM {P[0]} p0 "
+            f"WHERE EXISTS (SELECT 1 FROM {C[0]} c0 WHERE c0.{C[1]} = p0.{P[1]})").fetchone()[0]
+        conn.close()
+
+        if n_child and n_parent and matched == 0:
+            add("block", "値が1件も一致しません",
+                f"{ct}.{cc} の {n_child:,} 件は、{pt}.{pc} の {n_parent:,} 件のどれとも一致しません。"
+                "この2列で JOIN しても結果は必ず0行になります。別の意味の列です。")
+        elif n_child and matched:
+            miss = n_child - matched
+            rate = miss / n_child * 100
+            if rate >= 30:
+                add("warn", "一致しない値が多すぎます",
+                    f"{ct}.{cc} の {n_child:,} 件のうち {miss:,} 件（{rate:.0f}%）が {pt}.{pc} に存在しません。"
+                    "外部キーなら親に無い値はごく少数のはずです。列の取り違えの可能性があります。")
+            elif miss:
+                add("info", "親に無い値があります",
+                    f"{ct}.{cc} の {miss:,} 件（{rate:.1f}%）が {pt}.{pc} に存在しません"
+                    "（未登録・削除済みの参照。数が少なければ通常の範囲です）。")
+            # 子の値の種類が極端に少なく、親のごく一部にしか当たらない → 区分値とIDの偶然の一致
+            if n_parent_distinct >= 10 and n_child_distinct <= 10                     and parent_hit / n_parent_distinct < 0.5:
+                add("warn", "区分値とIDを結んでいる可能性があります",
+                    f"{ct}.{cc} は値の種類が {n_child_distinct} 種類しかなく"
+                    f"（{', '.join(str(v) for v in _sample_values(prof_c, ct, cc)[:6])} など）、"
+                    f"{pt}.{pc} の {n_parent_distinct:,} 種類のうち {parent_hit} 種類にしか当たりません。"
+                    "ステータスや区分のような「コード値」の列を、番号がたまたま重なるIDの列に"
+                    "結ぼうとしていませんか。")
+        if n_parent and n_parent_distinct < n_parent:
+            dup = n_parent - n_parent_distinct
+            add("warn", "参照先（1側）の値が一意ではありません",
+                f"{pt}.{pc} は {n_parent:,} 件中 {dup:,} 件が重複しています。"
+                "「1側」は本来ユニークです。重複したまま JOIN すると行が増えて集計が膨らみます。"
+                "多重度を N:M にするか、参照先を主キー列に変えてください。")
+    except Exception as e:
+        add("info", "実データでの確認ができませんでした", str(e)[:120])
+
+    level = "ok"
+    if any(i["level"] == "block" for i in issues):
+        level = "block"
+    elif any(i["level"] == "warn" for i in issues):
+        level = "warn"
+    return {"level": level, "issues": issues}
+
+
 def child_parent(entries: list[dict], edge: dict) -> tuple:
     """この関連の (子, 親)。参照整合性の検査はこの向きでしか意味を持たない。
 

@@ -50,6 +50,9 @@ function render() {
     // 宛先
     chipList($('#addrList'), s.allow_addresses || [],
         i => s.allow_addresses.splice(i, 1), '登録なし');
+    // 定期取り込みの失敗の通知先（管理者）
+    chipList($('#alertList'), s.alert_to || [],
+        i => s.alert_to.splice(i, 1), '登録なし（通知しません）');
     const n = (s.allow_addresses || []).length;
     $('#allowState').replaceChildren(n
         ? el('div', { class: 'alert alert--ok' },
@@ -165,7 +168,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         addTo('allow_addresses', $('#newAddr'));
     });
-    [['#newSender', '#addSender'], ['#newAddr', '#addAddr']].forEach(([i, b]) =>
+    $('#addAlert').addEventListener('click', () => {
+        const v = ($('#newAlert').value || '').trim();
+        const doms = state.allowed_domains || [];
+        const dom = v.toLowerCase().split('@').pop();
+        if (v && doms.length && !doms.some(d => dom === d || dom.endsWith('.' + d))) {
+            toast(`${state.allowed_domains_label} のアドレスだけ登録できます。`, 'warn', 7000);
+            return;
+        }
+        addTo('alert_to', $('#newAlert'));
+    });
+    [['#newSender', '#addSender'], ['#newAddr', '#addAddr'], ['#newAlert', '#addAlert']].forEach(([i, b]) =>
         $(i).addEventListener('keydown', ev => { if (ev.key === 'Enter') $(b).click(); }));
 
     $('#save').addEventListener('click', async ev => {
@@ -176,6 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 sender: state.sender, sender_name: state.sender_name,
                 senders: state.senders || [],
                 allow_addresses: state.allow_addresses || [],
+                alert_to: state.alert_to || [],
                 max_recipients: state.max_recipients,
                 dry_run: state.dry_run,
             });

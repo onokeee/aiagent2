@@ -32,14 +32,18 @@
         <span class="dbpick__name"
               data-desc-title="{{ f.name }}{% if f.title %}（{{ f.title }}）{% endif %}"
               data-desc="{{ f.description }}{% if f.caveats %}{% for c in f.caveats %}
-※ {{ c }}{% endfor %}{% endif %}"
+※ {{ c }}{% endfor %}{% endif %}{% if f.problem %}
+⚠ {{ f.problem }}{% endif %}"
               data-desc-meta="{{ f.tables|length }}テーブル">{{ f.name }}</span>
+        {% if f.problem %}<span class="warnmark" title="{{ f.problem }}">{{ icon('alert', 'icon--sm') }}</span>{% endif %}
         <span class="badge">{{ f.tables|length }}</span>
       </div>
       <div class="dbpick__tables">
         {% for t in f.tables %}
-          <label><span data-desc-title="{{ t.name }}" data-desc="{{ t.description }}"
-                  data-desc-meta="{{ '{:,}行'.format(t.rows) if t.rows is not none else '行数不明' }} / {{ t.columns }}列">{{ t.name }}</span></label>
+          <label><span data-desc-title="{{ t.name }}" data-desc="{{ t.description }}{% if t.problem %}
+⚠ 定期取り込み: {{ t.problem }}{% endif %}"
+                  data-desc-meta="{{ '{:,}行'.format(t.rows) if t.rows is not none else '行数不明' }} / {{ t.columns }}列">{{ t.name }}</span>
+            {% if t.problem %}<span class="warnmark" title="{{ t.problem }}">{{ icon('alert', 'icon--sm') }}</span>{% endif %}</label>
         {% endfor %}
       </div>
     </div>

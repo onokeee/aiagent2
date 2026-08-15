@@ -22,6 +22,7 @@ import chats
 import config
 import custom_tools
 import db
+import jobs
 import llm
 import mailer
 import models
@@ -93,6 +94,17 @@ def index():
                       "description": meta.get("description") or "",
                       "caveats": meta.get("caveats") or [],
                       "tables": tables})
+    # 設定どおりに更新できていない定期取り込み → サイドバーのDB名・テーブル名に警告マーク
+    problems = jobs.problems_by_table()
+    for f in files:
+        marks = []
+        for t in f["tables"]:
+            ps = problems.get((f["name"], t["name"]))
+            if ps:
+                t["problem"] = "／".join(p["message"] for p in ps)
+                marks.append(t["name"])
+        if marks:
+            f["problem"] = f"定期取り込みが設定どおりに動いていません: {'、'.join(marks)}"
     return render_template(
         "chat.html",
         db_files=files,

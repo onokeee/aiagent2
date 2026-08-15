@@ -57,8 +57,13 @@ def _log(msg: str) -> None:
         pass
 
 
+#: 前回の周回で「設定どおりに更新できていなかった」ジョブ。変化を見るために持つ。
+_prev_problems: list = []
+
+
 def tick() -> list:
     """期限が来たジョブを実行する（スレッドの1周分。テストからも呼べる）。"""
+    global _prev_problems
     ran = []
     for job in jobs.due_jobs():
         res = jobs.run_job(job)
@@ -70,6 +75,17 @@ def tick() -> list:
     _state["tick_count"] += 1
     if ran:
         _state["last_ran"] = ran[-10:]
+    # 「健全→失敗」「失敗→復旧」の変わり目だけ管理者に知らせる
+    try:
+        import mailer
+        cur = jobs.problems()
+        if _state["tick_count"] > 1:          # 起動直後の1周目は「変化」ではないので送らない
+            r = mailer.alert_import_problems(cur, _prev_problems)
+            if r:
+                _log(f"管理者に通知: {r.get('message', '')}")
+        _prev_problems = cur
+    except Exception as e:
+        _log(f"通知の判定に失敗（続行）: {e}")
     return ran
 
 

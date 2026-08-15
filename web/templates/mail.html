@@ -75,6 +75,24 @@
   </div>
 
   <div class="card">
+    <div class="card__title">定期取り込みの失敗を知らせる先（管理者）</div>
+    <div class="card__desc">
+      定期取り込みが<b>設定どおりに更新できなくなったとき</b>（取り込み元のファイルが無い・
+      シート名や列が変わった・自動実行が止まっている等）に、ここへメールで知らせます。<br>
+      送るのは状態が変わった瞬間の1回だけです（失敗が続く間は繰り返しません）。直ったら「復旧」を1回送ります。
+      登録できるドメインは宛先と同じ縛りです。空のままなら通知しません。
+    </div>
+    <div class="mt" style="max-width:520px">
+      <label class="field">通知先のアドレス</label>
+      <div id="alertList"></div>
+      <div class="row mt">
+        <input type="text" id="newAlert" class="grow" placeholder="例: admin@example.co.jp">
+        <button class="btn btn--sm" id="addAlert">追加</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card__title">送信のしかた</div>
     <div class="row mb">
       <div style="width:240px">

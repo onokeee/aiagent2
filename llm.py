@@ -192,6 +192,26 @@ def build_system_prompt(scope: list[dict], admin: bool = False,
         import models as models_mod        # 循環importを避ける
         inline_cap = models_mod.inline_limit_for(model)
     aliases = [s["alias"] for s in scope]
+
+    # 設定どおりに更新できていないテーブルがあれば、AIに教えておく。
+    # そのテーブルを使った回答に「データが古い可能性」を添えさせるため。
+    import jobs as jobs_mod
+    stale_lines = []
+    in_scope = {s["name"] for s in scope}
+    for (db_file, table), ps in jobs_mod.problems_by_table().items():
+        if db_file in in_scope:
+            alias = next((s["alias"] for s in scope if s["name"] == db_file), db_file)
+            since = (ps[0].get("since") or "")[:16].replace("T", " ")
+            stale_lines.append(f"- {alias}.{table}: {ps[0]['message']}"
+                               + (f"（{since} 以降）" if since else ""))
+    stale_note = ""
+    if stale_lines:
+        stale_note = ("\n# 更新できていないデータ（重要）\n"
+                      "次のテーブルは定期取り込みが設定どおりに動いておらず、中身が古い可能性がある。\n"
+                      + "\n".join(stale_lines) + "\n"
+                      "これらのテーブルを使って答えるときは、回答の冒頭に"
+                      "「※ このデータは○月○日以降更新されていない可能性があります（理由）」と必ず一言添える。"
+                      "使わない質問では触れなくてよい。\n")
     if len(aliases) > 1:
         naming = (f"複数のDBが対象です（{', '.join(aliases)}）。"
                   "テーブル名は必ず『エイリアス.テーブル名』で修飾すること"
@@ -283,7 +303,7 @@ PIVOT構文も無い。次はSQLで計算しようとせず、必ずツールを
 # 利用可能なツール
 {tool_list}
 
-# SQLルール
+{stale_note}# SQLルール
 - SQLite方言。SELECT(または WITH ... SELECT)のみ。INSERT/UPDATE/DELETE/DDL/PRAGMA等は禁止(実行されません)。
 - {naming}
 - 1回の呼び出しで1ステートメント。末尾セミコロン不要。

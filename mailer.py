@@ -61,6 +61,7 @@ class SmtpSettings:
     senders: list = field(default_factory=list)      # 画面で選べる差出人の候補
     max_recipients: int = 20
     dry_run: bool = True
+    alert_to: list = field(default_factory=list)     # 定期取り込みの失敗を知らせる管理者
 
     @property
     def configured(self) -> bool:
@@ -111,7 +112,8 @@ class SmtpSettings:
 SERVER_KEYS = ("host", "port", "timeout")
 # 差出人と宛先まわり
 EDITABLE_KEYS = SERVER_KEYS + ("sender", "sender_name", "senders",
-                               "allow_addresses", "max_recipients", "dry_run")
+                               "allow_addresses", "max_recipients", "dry_run",
+                               "alert_to")
 
 
 def _read_overrides() -> dict:
@@ -157,6 +159,7 @@ def settings() -> SmtpSettings:
         senders=senders,
         max_recipients=int(ov.get("max_recipients", config.SMTP_MAX_RECIPIENTS) or 20),
         dry_run=bool(ov["dry_run"]) if "dry_run" in ov else config.SMTP_DRY_RUN,
+        alert_to=[str(a).strip() for a in (ov.get("alert_to") or []) if str(a).strip()],
     )
 
 
@@ -233,6 +236,14 @@ def validate_settings(data: dict) -> list[str]:
             errors.append(f"{addr} は登録できません。"
                           f"登録できるのは {allowed_domains_label()} のアドレスだけです"
                           "（env の SEND_OK_MAIL_DOMAIN）。")
+    # 通知先の管理者も同じ縛り（許可ドメイン）。社外へは飛ばさない
+    for a in (data.get("alert_to") or []):
+        addr = str(a).strip()
+        if not EMAIL_RE.match(addr):
+            errors.append(f"通知先として登録できない形式です: {a}")
+        elif not domain_ok(addr):
+            errors.append(f"{addr} は通知先に登録できません。"
+                          f"登録できるのは {allowed_domains_label()} のアドレスだけです。")
 
     try:
         n = int(data.get("max_recipients") or 0)
@@ -254,7 +265,8 @@ def _with_current(data: dict) -> dict:
     merged = {"host": s.host, "port": s.port, "timeout": s.timeout,
               "sender": s.sender, "sender_name": s.sender_name,
               "senders": s.senders, "allow_addresses": s.allow_addresses,
-              "max_recipients": s.max_recipients, "dry_run": s.dry_run}
+              "max_recipients": s.max_recipients, "dry_run": s.dry_run,
+              "alert_to": s.alert_to}
     # None は「指定なし」。空文字や空リストは「消したい」なので通す。
     merged.update({k: v for k, v in (data or {}).items()
                    if k in merged and v is not None})
@@ -279,6 +291,8 @@ def save_settings(data: dict, user: str | None = None) -> SmtpSettings:
                             if str(a).strip()],
         "max_recipients": int(merged["max_recipients"] or 20),
         "dry_run": bool(merged["dry_run"]),
+        "alert_to": [str(a).strip() for a in (merged.get("alert_to") or [])
+                     if str(a).strip()],
     })
     _write_overrides(keep)
     print(f"[mailer] 設定を更新しました（{user or '不明'}）: "
@@ -297,6 +311,7 @@ def status() -> dict:
             "sender_name": s.sender_name, "dry_run": s.dry_run,
             "senders": s.senders,
             "allow_addresses": s.allow_addresses,
+            "alert_to": s.alert_to,
             "restricted": s.restricted, "timeout": s.timeout,
             "allowed_domains": list(config.SEND_OK_MAIL_DOMAIN),
             "allowed_domains_label": allowed_domains_label(),
@@ -459,10 +474,16 @@ def _norm_addresses(value) -> list[str]:
     return out
 
 
-def validate_draft(draft: dict) -> list[str]:
-    """送る前の点検。1つでも返ったら送信できない。"""
+def validate_draft(draft: dict, *, system: bool = False) -> list[str]:
+    """送る前の点検。1つでも返ったら送信できない。
+
+    system=True は、アプリ自身が管理者へ送る通知（定期取り込みの失敗など）。
+    宛先は「メール設定」の通知先（alert_to）そのものなので、利用者向けの
+    許可リスト（allow_addresses）とは独立に通す。サーバ・差出人の設定は同じく必要。
+    """
     s = settings()
-    errors = list(s.problems())
+    errors = [e for e in s.problems()
+              if not (system and "送信できる宛先" in e)]
     to = _norm_addresses(draft.get("to"))
     cc = _norm_addresses(draft.get("cc"))
     bcc = _norm_addresses(draft.get("bcc"))
@@ -475,7 +496,13 @@ def validate_draft(draft: dict) -> list[str]:
     if total > s.max_recipients:
         errors.append(f"宛先が {total} 件あります。一度に送れるのは "
                       f"{s.max_recipients} 件までです（SMTP_MAX_RECIPIENTS）。")
-    if not s.allow_addresses:
+    if system:
+        # 通知先として登録したアドレスにだけ送る
+        ok = {a.lower() for a in s.alert_to}
+        for addr in to + cc + bcc:
+            if addr.lower() not in ok:
+                errors.append(f"{addr} は通知先に登録されていません。")
+    elif not s.allow_addresses:
         errors.append("送信できる宛先が1件も登録されていません。"
                       "「メール設定」画面で登録するまで、どこにも送信できません。")
     else:
@@ -558,13 +585,14 @@ def _connect(s: SmtpSettings):
 
 
 def send(draft: dict, attachments: list[dict] | None = None,
-         user: str | None = None) -> dict:
+         user: str | None = None, *, system: bool = False) -> dict:
     """実際に送る。呼ぶ前に必ずユーザーの承認を取ること。
 
     SMTP_DRY_RUN=true のあいだは接続せず、組み立てた内容だけ返す
     （本番のSMTPを教えてもらう前に画面を試せるようにするため）。
+    system=True はアプリ自身からの管理者通知（validate_draft 参照）。
     """
-    errors = validate_draft(draft)
+    errors = validate_draft(draft, system=system)
     if errors:
         raise MailError(" / ".join(errors))
     s = settings()
@@ -636,3 +664,52 @@ def _log(record: dict) -> None:
 def sent_log(limit: int = 50) -> list[dict]:
     with _lock:
         return list(reversed(_sent_log[-limit:]))
+
+
+# =============================================================================
+# 定期取り込みの失敗を管理者に知らせる
+#
+# 状態が「健全 → 失敗」に変わった瞬間に1回だけ送る。失敗が続くあいだ毎周期
+# 送ると（15分ごとの設定なら1日96通）読まれなくなるので、直るまで黙る。
+# 直ったら「復旧しました」を1回送る。宛先は「メール設定」の通知先（管理者）。
+# =============================================================================
+
+def alert_import_problems(current: list[dict], previous: list[dict]) -> dict | None:
+    """定期取り込みの状態変化を管理者に送る。送らなかったときは None。
+
+    current / previous は jobs.problems() の結果（今回と前回）。
+    """
+    s = settings()
+    if not s.alert_to:
+        return None
+    now_ids = {p["id"]: p for p in current}
+    prev_ids = {p["id"]: p for p in previous}
+    newly = [now_ids[i] for i in now_ids if i not in prev_ids]
+    fixed = [prev_ids[i] for i in prev_ids if i not in now_ids]
+    if not newly and not fixed:
+        return None
+
+    lines = []
+    if newly:
+        lines.append("■ 設定どおりに更新できなくなった定期取り込み")
+        for p in newly:
+            lines.append(f"  ・{p['name']}（{p['db_file']} / {p['table']}）")
+            lines.append(f"     {p['message']}")
+        lines.append("")
+        lines.append("  対処: 取り込み元のファイル・シート名・列構成を確認してください。")
+        lines.append("  失敗している間、既存のデータは変わりません（前回の内容のまま残っています）。")
+        lines.append("")
+    if fixed:
+        lines.append("■ 復旧した定期取り込み")
+        for p in fixed:
+            lines.append(f"  ・{p['name']}（{p['db_file']} / {p['table']}）")
+        lines.append("")
+    lines.append(f"確認: データカタログ > DB・テーブル > 各テーブルの「管理」")
+    subject = ("[DB分析アシスタント] 定期取り込みが失敗しています"
+               if newly else "[DB分析アシスタント] 定期取り込みが復旧しました")
+    draft = {"to": list(s.alert_to), "subject": subject, "body": "\n".join(lines)}
+    try:
+        return send(draft, [], user="scheduler", system=True)
+    except Exception as e:
+        print(f"[mailer] 通知を送れませんでした: {e}")
+        return None

@@ -439,6 +439,10 @@ table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .tab:hover { color: var(--text); }
 .tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+/* 定期取り込みが設定どおりに動いていないDB・テーブルに付ける印（チャットのサイドバー） */
+.warnmark { color: var(--warn, #c77700); display: inline-flex; align-items: center; margin-left: 4px; }
+.warnmark .icon { width: 14px; height: 14px; }
+
 /* 別画面へ渡すタブ（データカタログ⇄取り込み）はリンクだが、見た目はボタンのタブと揃える */
 a.tab { text-decoration: none; display: inline-block; line-height: normal; }
 

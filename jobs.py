@@ -218,6 +218,57 @@ def due_jobs(now: datetime | None = None) -> list[dict]:
 
 
 # =============================================================================
+# 「設定どおりに更新できていない」ジョブ
+#
+# 失敗は履歴を見に行かないと分からず、日次の取り込みが月曜から失敗して金曜まで
+# 誰も気づかない、が起こり得る。そこで「いま健全でないジョブ」を1か所で判定し、
+#   ・チャットのサイドバー（DB名・テーブル名に警告マーク）
+#   ・AIの回答（そのテーブルを使う質問に、データが古い可能性を添える）
+#   ・管理者へのメール通知
+# の3つが同じ判断を使う。
+# =============================================================================
+
+def problems() -> list[dict]:
+    """設定どおりに更新できていない定期取り込み。
+
+    2種類ある:
+      failed  … 前回の実行が失敗した（ファイルが無い・シート名や列が変わった等）
+      overdue … 有効な自動実行なのに、予定の2周期ぶん以上動いていない
+                （スケジューラが止まっている・アプリが落ちていた等）
+    戻り値: [{id, name, db_file, table, kind, since, message}, ...]
+    """
+    now = datetime.now()
+    out = []
+    for j in list_jobs():
+        if not j.get("enabled", True):
+            continue
+        if j.get("last_status") == "error":
+            out.append({"id": j.get("id"), "name": j.get("name"),
+                        "db_file": j.get("db_file"), "table": j.get("table"),
+                        "kind": "failed", "since": j.get("last_run") or "",
+                        "message": j.get("last_message") or "前回の実行が失敗しました。"})
+            continue
+        minutes = int(j.get("interval_minutes") or 0)
+        last = parse_dt(j.get("last_run"))
+        if minutes > 0 and last and (now - last) > timedelta(minutes=minutes * 2):
+            out.append({"id": j.get("id"), "name": j.get("name"),
+                        "db_file": j.get("db_file"), "table": j.get("table"),
+                        "kind": "overdue", "since": j.get("last_run") or "",
+                        "message": (f"{interval_label(minutes)}の予定ですが、"
+                                    f"{last:%m/%d %H:%M} から更新されていません。"
+                                    "自動実行が止まっている可能性があります。")})
+    return out
+
+
+def problems_by_table() -> dict:
+    """{(db_file, table): [problem, ...]}。画面やAIの注記で引きやすい形。"""
+    out: dict = {}
+    for p in problems():
+        out.setdefault((p["db_file"], p["table"]), []).append(p)
+    return out
+
+
+# =============================================================================
 # 実行
 # =============================================================================
 

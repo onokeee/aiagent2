@@ -52,18 +52,53 @@ async function api(url, body, method = 'POST') {
 }
 
 /* 最低限のMarkdown。AIの回答は見出し・箇条書き・強調・コードくらいしか使わない */
+/* Markdownの表（| a | b | の並び）を <table> にする。
+   AIは一覧を表で返すことが多く、生の | と --- が並ぶと読めない。
+   セル内の <br>（AIが改行の意図で書く）は改行として扱う。行の | が揃っていなくても
+   ある分だけ描く（崩れた表を全部捨てるより、読める形で出す方がよい）。 */
+function mdTables(html) {
+    const lines = html.split('\n');
+    const out = [];
+    let i = 0;
+    const isRow = l => /^\s*\|.*\|\s*$/.test(l);
+    const isSep = l => /^\s*\|(\s*:?-{2,}:?\s*\|)+\s*$/.test(l);
+    const cells = l => l.trim().replace(/^\||\|$/g, '').split('|')
+        .map(c => c.trim().replace(/&lt;br\s*\/?&gt;/gi, '<br>'));
+    while (i < lines.length) {
+        if (isRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1])) {
+            const head = cells(lines[i]);
+            const body = [];
+            i += 2;
+            while (i < lines.length && isRow(lines[i]) && !isSep(lines[i])) {
+                body.push(cells(lines[i])); i += 1;
+            }
+            out.push('<div class="tablewrap"><table class="data"><thead><tr>'
+                + head.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>'
+                + body.map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('')
+                + '</tbody></table></div>');
+            continue;
+        }
+        out.push(lines[i]); i += 1;
+    }
+    return out.join('\n');
+}
+
 function mdToHtml(src) {
     const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const blocks = esc(src || '').split(/```/);
     return blocks.map((chunk, i) => {
         if (i % 2 === 1) return `<pre class="mono" style="background:var(--surface-2);padding:10px;border-radius:6px;overflow:auto">${chunk.replace(/^\w*\n/, '')}</pre>`;
-        return chunk
+        // 表を先に確定してから行単位の置換にかける（表の中の * や - を箇条書きと誤認しないため）
+        return mdTables(chunk)
             .replace(/^### (.*)$/gm, '<h4>$1</h4>')
             .replace(/^## (.*)$/gm, '<h3>$1</h3>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/`([^`]+)`/g, '<code>$1</code>')
             .replace(/^\s*[-*] (.*)$/gm, '<li>$1</li>')
             .replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, '<ul>$1</ul>')
+            // 表の直前後の改行は <br> にしない（表の周りに余白が二重に入る）
+            .replace(/\n*(<div class="tablewrap">)/g, '$1')
+            .replace(/(<\/div>)\n*/g, '$1')
             .replace(/\n{2,}/g, '</p><p>')
             .replace(/\n/g, '<br>');
     }).join('');

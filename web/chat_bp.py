@@ -91,8 +91,7 @@ def index():
                    "columns": len(info.get("columns") or [])}
                   for t, info in prof["tables"].items()]
         files.append({"name": f.name, "title": meta.get("title") or "",
-                      "description": meta.get("description") or "",
-                      "caveats": meta.get("caveats") or [],
+                      "description": catalog.db_description(meta),
                       "tables": tables})
     # 設定どおりに更新できていない定期取り込み → サイドバーのDB名・テーブル名に警告マーク
     problems = jobs.problems_by_table()

@@ -1443,9 +1443,7 @@ def write_meta():
         if mp.exists():
             print(f"SKIP {mp.name} は既存のため上書きしません（作り直すなら削除してから実行）")
             continue
-        mp.write_text(
-            __import__("yaml").safe_dump(meta, allow_unicode=True, sort_keys=False),
-            encoding="utf-8")
+        catalog.save_meta(path, meta)      # 旧 caveats は説明に畳まれる
         print(f"OK  {mp.name} を作成")
 
 

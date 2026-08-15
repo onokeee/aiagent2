@@ -70,17 +70,17 @@
         <strong>このDBについて</strong>
         <span class="muted small">{{ title or 'タイトル未設定' }}</span>
         {% if not description %}<span class="badge badge--warn">説明なし</span>{% endif %}
-        {% if caveats %}<span class="badge">注意書き {{ caveats|length }}</span>{% endif %}
       </summary>
       <div class="acc__body">
         <label class="field">タイトル</label>
-        <input type="text" id="dbTitle" value="{{ title }}">
+        <input type="text" id="dbTitle" value="{{ title }}" placeholder="例）販売管理DB">
         <div style="height:10px"></div>
-        <label class="field">説明</label>
-        <textarea id="dbDesc" rows="3">{{ description }}</textarea>
-        <div style="height:10px"></div>
-        <label class="field">注意書き（1行に1つ）</label>
-        <textarea id="dbCaveats" rows="3">{{ caveats|join('\n') }}</textarea>
+        <label class="field">説明
+          <span class="muted" style="font-weight:400">— 何のデータか。AIが知らないと間違える前提は「※」で始める行に</span></label>
+        {# この文章がそのままAIの理解になる。空のときは薄地の例文で書き方を示す #}
+        <textarea id="dbDesc" rows="5" placeholder="例）受注・請求・入金。顧客と担当者は demo_master 側にある。
+※ 金額列を持つのは order_items（明細）。orders に金額は無いので必ず明細を集計する。
+※ order_date は 'YYYY-MM-DD' の文字列。月で切るなら strftime('%Y-%m', order_date)。">{{ description }}</textarea>
         <div class="mt"><button class="btn btn--primary btn--sm" id="infoSave">保存</button></div>
         <div class="small muted mt">
           メタ情報ファイル: <code>data/{{ target }}.meta.yaml</code>（全員共通・管理者のみ編集）

@@ -31,8 +31,7 @@
       <div class="dbpick__head">
         <span class="dbpick__name"
               data-desc-title="{{ f.name }}{% if f.title %}（{{ f.title }}）{% endif %}"
-              data-desc="{{ f.description }}{% if f.caveats %}{% for c in f.caveats %}
-※ {{ c }}{% endfor %}{% endif %}{% if f.problem %}
+              data-desc="{{ f.description }}{% if f.problem %}
 ⚠ {{ f.problem }}{% endif %}"
               data-desc-meta="{{ f.tables|length }}テーブル">{{ f.name }}</span>
         {% if f.problem %}<span class="warnmark" title="{{ f.problem }}">{{ icon('alert', 'icon--sm') }}</span>{% endif %}

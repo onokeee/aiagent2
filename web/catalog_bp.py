@@ -160,7 +160,7 @@ def index():
         "catalog.html",
         db_files=[f.name for f in db.list_db_files()],
         target=target.name, title=meta.get("title", ""),
-        description=meta.get("description", ""), caveats=meta.get("caveats") or [],
+        description=catalog.db_description(meta),
         coverage=ov["coverage"], drift=ov["drift"], tables=tables,
         db_glossary=catalog.db_glossary(meta),
         relationships=meta.get("relationships") or [],
@@ -983,8 +983,10 @@ def save_overview():
     path = db.path_for(body["db"])
     meta = catalog.load_meta(path)
     meta["title"] = (body.get("title") or "").strip()
-    meta["description"] = (body.get("description") or "").strip()
-    meta["caveats"] = [c.strip() for c in (body.get("caveats") or []) if c.strip()]
+    # 説明は1欄（注意したい事実は ※ で始める行として同じ欄に書く）。旧 caveats は畳む
+    meta["description"] = "\n".join(
+        l.rstrip() for l in (body.get("description") or "").splitlines()).strip()
+    meta.pop("caveats", None)
     catalog.save_meta(path, meta)
     return jsonify({"ok": True})
 

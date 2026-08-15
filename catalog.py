@@ -10,8 +10,9 @@ UI表示・ER図・LLM用 system prompt を **同じ情報源** から生成す�
 
 メタ情報(YAML)の構造:
   title: 受注管理DB
-  description: ...
-  caveats: [ ... ]
+  description: |            # 何のデータか＋AIが知らないと間違える前提（※で始める行）
+    受注と請求。金額は明細側にしかない。
+    ※ 退職者も employees に残る。現役だけなら active_flag = 1 で絞る。
   tables:
     orders:
       description: 受注明細。1行 = 1受注明細行。
@@ -49,7 +50,7 @@ import db
 # メタ情報（サイドカーYAML）
 # =============================================================================
 
-_META_KEYS = ("title", "description", "caveats", "tables", "relationships", "glossary",
+_META_KEYS = ("title", "description", "tables", "relationships", "glossary",
               "examples", "checks", "er_layout", "er_external", "tools", "builtin_tools")
 
 
@@ -79,9 +80,33 @@ def load_meta(db_path) -> dict:
     return _read_yaml(meta_path(db_path))
 
 
+def merge_caveats(description, caveats) -> str:
+    """説明と、かつて別欄だった注意書き(caveats)を1つの文章にする。
+
+    以前は「説明」と「注意書き（1行に1つ）」の2欄だったが、AIへの渡り方は
+    同じ場所に続けて書かれた文章で、分ける意味が薄かった。いまは「説明」1欄で、
+    注意したい事実は行頭に ※ を付けて書く。古いYAMLの caveats はここで合流させる。
+    """
+    lines = [str(description or "").strip()]
+    for c in (caveats or []):
+        c = str(c or "").strip()
+        if c:
+            lines.append(c if c.startswith(("※", "⚠")) else f"※ {c}")
+    return "\n".join(l for l in lines if l)
+
+
+def db_description(meta: dict) -> str:
+    """DBの説明（古い caveats があれば ※ 行として末尾に合流させた1本の文章）。"""
+    return merge_caveats(meta.get("description"), meta.get("caveats"))
+
+
 def save_meta(db_path, meta: dict) -> None:
     """カタログを保存する（内容をまるごと書く）。呼べるのは管理者の画面だけ。"""
     target = meta_path(db_path)
+    # 説明は1欄。古い caveats が残っていれば説明に合流させてから書く
+    if meta.get("caveats"):
+        meta["description"] = merge_caveats(meta.get("description"), meta.get("caveats"))
+        meta.pop("caveats", None)
     cleaned = {}
     for k in _META_KEYS:
         v = meta.get(k)
@@ -94,9 +119,26 @@ def save_meta(db_path, meta: dict) -> None:
         target.write_text("", encoding="utf-8")
         return
     target.write_text(
-        yaml.safe_dump(cleaned, allow_unicode=True, sort_keys=False, default_flow_style=False),
+        yaml.dump(cleaned, Dumper=_MetaDumper, allow_unicode=True, sort_keys=False,
+                  default_flow_style=False),
         encoding="utf-8",
     )
+
+
+class _MetaDumper(yaml.SafeDumper):
+    """複数行の文字列（説明・SQL）は '...' の折り返しではなく | ブロックで書く。
+    手で開いて読める・直せるファイルにしておくため。"""
+
+
+def _repr_str(dumper, data: str):
+    if "\n" in data:
+        # 行末の空白があると PyYAML は | を使えず引用符に落ちるので、先に落とす
+        data = "\n".join(l.rstrip() for l in data.splitlines())
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+_MetaDumper.add_representer(str, _repr_str)
 
 
 # =============================================================================
@@ -1031,10 +1073,9 @@ def db_text(alias: str, db_path, tables: list[str] | None, full: bool) -> str:
     lines = []
     title = meta.get("title") or ""
     lines.append(f"## DB: {alias}" + (f"（{title}）" if title else "") + f" — ファイル: {Path(db_path).name}")
-    if meta.get("description"):
-        lines.append(str(meta["description"]).strip())
-    for c in (meta.get("caveats") or []):
-        lines.append(f"⚠ {c}")
+    desc = db_description(meta)
+    if desc:
+        lines.append(desc)
     lines.append("")
     if full:
         for tname in names:

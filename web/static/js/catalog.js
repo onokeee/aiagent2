@@ -1829,7 +1829,6 @@ async function saveInfo() {
     try {
         await api('/api/catalog/overview', {
             db: CAT.db, title: $('#dbTitle').value, description: $('#dbDesc').value,
-            caveats: $('#dbCaveats').value.split('\n'),
         });
     } catch (e) { toast(e.message, 'err'); return; }
     setDirty('info', false);

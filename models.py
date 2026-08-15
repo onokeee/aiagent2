@@ -99,6 +99,36 @@ def prompt_inline_limit() -> int:
     return max(INLINE_LIMIT_MIN, min(v, INLINE_LIMIT_MAX))
 
 
+#: モデルの文脈のうち、カタログに使ってよい割合。
+#: 残り半分はツール定義・会話の履歴・SQL結果・回答のために空けておく。
+CATALOG_CONTEXT_RATIO = 0.5
+
+
+def inline_limit_for(model: str | None = None) -> int:
+    """実効のインライン上限（文字）。管理者の上限と、モデルの実力の小さい方。
+
+    80,000字の固定値だと、文脈の小さいモデル（gpt-4 の8Kなど）を選んだときに
+    「入るはずが入らない」が起こる。モデルが一度に読める量から逆算した容量と、
+    管理者が画面で決めた上限（安全弁）の小さい方を採る。
+    """
+    base = prompt_inline_limit()
+    if not model:
+        return base
+    import llm                     # 循環importを避ける（llm側もmodelsを遅延importしている）
+    context, _ = context_window(model)
+    capacity = int(context * CATALOG_CONTEXT_RATIO / llm.TOKENS_PER_CHAR_TEXT)
+    return max(INLINE_LIMIT_MIN, min(base, capacity))
+
+
+def catalog_total_chars() -> int:
+    """全DBの詳細カタログの合計文字数（キャッシュ済みテキストを測るだけ）。"""
+    import catalog as catalog_mod
+    import db as db_mod
+    return catalog_mod.inline_length(
+        [{"path": str(f), "alias": db_mod.alias_for(f), "tables": None}
+         for f in db_mod.list_db_files()])
+
+
 def context_window(model: str) -> tuple:
     """そのモデルが一度に読める量（トークン）と、それが確かな値かどうか。
 
@@ -229,16 +259,35 @@ def choose(user, model: str) -> str:
     return model
 
 
+def _scope_note(total: int, limit: int) -> str:
+    """カタログがそのモデルに収まらないときの、画面向けの説明文。"""
+    head = (f"データカタログ全体（約{total:,}字）が、このモデルで一度に読める量"
+            f"（約{limit:,}字）を超えています。")
+    if config.SCOPE_MODE == "all":
+        return (head + "詳細（列名・コード値）が渡らない要約モードになります。"
+                "文脈の大きいモデルを選ぶか、env の SCOPE_MODE を見直してください。")
+    return (head + "質問ごとに関係するDBだけへ自動で絞って、詳細を保ちます"
+            "（答えに必要なDBが絞られるだけで、使えるデータは変わりません）。")
+
+
 def status(user: str | None = None, refresh: bool = False) -> dict:
     cur = current(user)
     names = available(refresh)
+    total = catalog_total_chars()
+    limit = inline_limit_for(cur)
+    fits = total <= limit
     return {
         "current": cur,
-        "models": [{"id": m, "vision": is_vision(m)} for m in names],
+        "models": [{"id": m, "vision": is_vision(m),
+                    "catalog_fits": total <= inline_limit_for(m)} for m in names],
         "vision": is_vision(cur),
         "from_env": bool(config.OPENAI_MODELS),
         "image_max_mb": config.IMAGE_MAX_MB,
         "image_max_count": config.IMAGE_MAX_COUNT,
+        # 選択中モデルにカタログ全体が収まるか（チャット画面の警告表示に使う）
+        "scope": {"mode": config.SCOPE_MODE, "catalog_chars": total,
+                  "limit_chars": limit, "fits": fits,
+                  "note": "" if fits else _scope_note(total, limit)},
     }
 
 

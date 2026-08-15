@@ -545,14 +545,26 @@ def _turn_error(e: _TurnError):
 def _auto_scope(question: str, chat: dict) -> list[dict]:
     """質問に合わせて対象DBを決める。利用者はDBを選ばない。
 
-    3つを合わせる:
-      ルーターが選んだDB … 質問と各DBの要約を突き合わせた前段の判定（llm.route_dbs）。
-                           無関係なDBのカタログを本番のプロンプトに入れないための要。
+    決め方は config.SCOPE_MODE:
+      auto   … カタログ全体が「選択中モデルの読める量」に収まるなら全DB直載せ
+               （ルーター省略＝選び漏れゼロ・プロンプトが毎回同一でキャッシュ最大）。
+               収まらないときだけルーターで絞り、詳細を保つ（既定）。
+      router … 常にルーターで絞る（無関係なDBを本番プロンプトに入れない）。
+      all    … 常に全DB（収まらなければ要約モードに落ちる。旧来の挙動）。
+
+    ルーターで絞るときは、さらに2つを合わせる:
       この会話で使ったDB … 「それをグラフに」のような続きの質問はルーターに手がかりが
                            無いので、実際にSQLが触ったDBは残し続ける。
       判定できないとき   … 全DB。ルーターの不調で答えられなくなるのがいちばん悪い。
     """
     all_names = [f.name for f in db.list_db_files()]
+    full = build_scope({n: [] for n in all_names})
+    if config.SCOPE_MODE == "all":
+        return full
+    if config.SCOPE_MODE == "auto":
+        limit = models.inline_limit_for(models.current(g.user))
+        if catalog.inline_length(full) <= limit:
+            return full                    # 全部入りで選び漏れゼロ
     history = [i.get("content") or "" for i in (chat.get("render_log") or [])
                if i.get("role") == "user" and i.get("kind") == "text"]
     routed = llm.route_dbs(question, history)
@@ -585,7 +597,9 @@ def _begin_turn():
     if not chat["messages"] or chat["messages"][0].get("role") != "system":
         chat["messages"].insert(0, {"role": "system", "content": ""})
     chat["messages"][0] = {"role": "system",
-                           "content": llm.build_system_prompt(scope, admin=_is_admin())}
+                           "content": llm.build_system_prompt(
+                               scope, admin=_is_admin(),
+                               model=models.current(g.user))}
     chat["messages"].append(llm.user_message(text, images))
     # 質問の時刻はここで入れる。保存は応答が終わってからなので、
     # 保存時に付けると「聞いた時刻」ではなく「答え終わった時刻」になってしまう。
@@ -756,7 +770,9 @@ def rewind():
     if not chat["messages"] or chat["messages"][0].get("role") != "system":
         chat["messages"].insert(0, {"role": "system", "content": ""})
     chat["messages"][0] = {"role": "system",
-                           "content": llm.build_system_prompt(scope, admin=_is_admin())}
+                           "content": llm.build_system_prompt(
+                               scope, admin=_is_admin(),
+                               model=models.current(g.user))}
     chat["messages"].append({"role": "user", "content": text})
     chat["render_log"].append({"role": "user", "kind": "text", "content": text,
                                "at": chats.now()})

@@ -178,12 +178,19 @@ def route_dbs(question: str, history: list[str] | None = None) -> list[str] | No
 
 # --- system prompt -----------------------------------------------------------
 
-def build_system_prompt(scope: list[dict], admin: bool = False) -> str:
+def build_system_prompt(scope: list[dict], admin: bool = False,
+                        model: str | None = None) -> str:
     """選択スコープのデータカタログを埋め込んだ system prompt を組み立てる。
 
     admin は「管理者だけに渡すツール」を一覧に載せるかどうか。
     渡していないツールを説明に書くと、AIが呼ぼうとして失敗するだけになる。
+    model を渡すと、カタログをインラインするかの判定を「そのモデルが読める量」で行う
+    （渡さなければ管理者設定/envの上限）。
     """
+    inline_cap = None
+    if model:
+        import models as models_mod        # 循環importを避ける
+        inline_cap = models_mod.inline_limit_for(model)
     aliases = [s["alias"] for s in scope]
     if len(aliases) > 1:
         naming = (f"複数のDBが選択されています（{', '.join(aliases)}）。"
@@ -201,9 +208,9 @@ def build_system_prompt(scope: list[dict], admin: bool = False) -> str:
         fn = t["function"]
         args = ", ".join((fn.get("parameters") or {}).get("properties", {}).keys())
         lines.append(f"- {fn['name']}({args}) : {fn['description']}")
-    custom = custom_tools.collect(scope)
+    custom = custom_tools.collect_everywhere(scope)
     if custom:
-        lines.append("※ 上記のうち次はこのDB専用に用意された専用ツールです。"
+        lines.append("※ 上記のうち次はこの環境専用に用意されたツールです。"
                      "目的が合致するときは自分でSQLを書かずにこちらを優先して使ってください: "
                      + ", ".join(t["name"] for t in custom))
     tool_list = "\n".join(lines)
@@ -273,7 +280,7 @@ PIVOT構文も無い。次はSQLで計算しようとせず、必ずツールを
 - 行数が多くなりそうなら LIMIT や集計で絞る。
 
 # 選択中のデータカタログ
-{catalog.prompt_for_scope(scope)}
+{catalog.prompt_for_scope(scope, limit=inline_cap)}
 
 現在時刻: {datetime.now().isoformat(timespec="seconds")}
 """

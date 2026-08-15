@@ -20,8 +20,17 @@ function renderModel() {
     sel.replaceChildren(...(list.length
         ? list.map(m => el('option', {
             value: m.id, ...(m.id === modelInfo.current ? { selected: 'selected' } : {}),
-        }, m.id + (m.vision ? ' ' : '')))
+            // カタログ全体が収まらないモデルは選ぶ前から分かるようにする
+            ...(m.catalog_fits === false ? { title: 'カタログ全体は入りません（自動で絞ります）' } : {}),
+        }, m.id + (m.vision ? ' ' : '') + (m.catalog_fits === false ? ' ⚠' : '')))
         : [el('option', { value: modelInfo.current }, modelInfo.current || '（未設定）')]));
+
+    // カタログ全体がこのモデルに収まらないときの警告（文面はサーバが状況に合わせて作る）
+    const warn = $('#modelWarn');
+    const scope = modelInfo.scope || {};
+    warn.style.display = scope.note ? '' : 'none';
+    warn.textContent = scope.note || '';
+
     const badge = $('#modelBadge');
     // 画像の添付はドラッグ＆ドロップと貼り付けで行う（ボタンは置かない）
     badge.textContent = modelInfo.vision

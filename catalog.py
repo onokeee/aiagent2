@@ -883,17 +883,19 @@ def inline_limit() -> int:
         return config.PROMPT_INLINE_LIMIT_CHARS
 
 
-def prompt_for_scope(scope: list[dict]) -> str:
+def prompt_for_scope(scope: list[dict], limit: int | None = None) -> str:
     """選択スコープ全体のカタログテキスト。
 
-    全文が PROMPT_INLINE_LIMIT_CHARS 以下なら詳細をインライン、
+    全文が上限（limit。省略時は管理者設定/env）以下なら詳細をインライン、
     超えるなら要約のみ（詳細は describe_table ツールで取得させる）。
+    limit は「選択中のモデルが一度に読める量」から呼び出し側が渡せる
+    （models.inline_limit_for 参照。固定値だと小さいモデルで溢れるため）。
     """
     if not scope:
         return "（現在、対象のDBが選択されていません。サイドバーでDBとテーブルを選ぶよう案内してください。）"
     full = "\n".join(db_text_cached(s["alias"], s["path"], s.get("tables"), full=True)
                      for s in scope)
-    if len(full) <= inline_limit():
+    if len(full) <= (limit if limit is not None else inline_limit()):
         return full
     compact = "\n".join(db_text_cached(s["alias"], s["path"], s.get("tables"), full=False)
                         for s in scope)

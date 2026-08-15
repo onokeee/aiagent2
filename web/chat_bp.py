@@ -63,6 +63,7 @@ TOOL_LABELS = {
     "abc_analysis": "ABC分析",
     "find_mail_recipients": "宛先の検索",
     "compose_email": "メールの下書き",
+    "analyze_usage": "利用状況の分析",
 }
 
 

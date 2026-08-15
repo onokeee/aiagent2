@@ -125,6 +125,12 @@ def for_table(db_file: str, table: str, limit: int = 30) -> list[dict]:
     return hit[:limit] if limit else hit
 
 
+def recent(limit: int = 100) -> list[dict]:
+    """テーブルを問わず、新しい順に。取り込み全体の傾向を見るとき用。"""
+    hit = _newest_first(_read_all())
+    return hit[:limit] if limit else hit
+
+
 def counts() -> dict[tuple, int]:
     """(DB, テーブル) ごとの件数。"""
     out: dict[tuple, int] = {}

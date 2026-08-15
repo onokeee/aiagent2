@@ -12,6 +12,7 @@
   業務分析  compare_periods / funnel_analysis / cohort_analysis / market_basket /
             survival_analysis / data_quality
   ファイル  explore_import_files（取り込み元フォルダを読むだけ。管理者のみ）
+  自己分析  analyze_usage（このアプリ自身の使われ方。管理者のみ）
   出す      export_excel / export_csv / export_text / export_pptx / export_docx /
             build_report
   送る      find_mail_recipients / compose_email
@@ -45,6 +46,7 @@ scope はチャット側で選択された対象DB群:
   reports.py  … PowerPoint / Word / 画面用レポート
   mail.py     … 宛先探しと下書き
   files.py    … 取り込み元フォルダの調査（管理者のみ）
+  usage.py    … このアプリ自身の利用状況（管理者のみ）
 ツールを1つ足すときは、宣言(schemas)と実処理(各モジュール)の2箇所を触る。
 実処理を置いたモジュールの HANDLERS に名前を登録すれば dispatch から引ける。
 管理者だけに渡したいものは、そのモジュールの ADMIN_TOOLS にも名前を入れる。
@@ -59,12 +61,12 @@ import db
 import excel
 import exports
 import verify
-from . import business, files, mail, query, reports, stats
+from . import business, files, mail, query, reports, stats, usage
 from . import results as _results
 from .common import _err, _json
 from .schemas import BUILTIN_TOOLS
 
-_MODULES = (query, stats, reports, mail, business, files)
+_MODULES = (query, stats, reports, mail, business, files, usage)
 
 # ツール名 -> 実処理。各モジュールが自分のぶんを申告する。
 _HANDLERS = {name: fn for m in _MODULES for name, fn in m.HANDLERS.items()}

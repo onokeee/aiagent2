@@ -12,6 +12,7 @@ import charts
 import excel
 import exports
 import pptx_report
+import usage
 
 #: 前のツールが返したデータを、SQLを書き直さずに使い回すための指定。
 #: 「集計 → グラフ → レポート」で同じSQLが何度も走るのを避ける。
@@ -1307,6 +1308,44 @@ BUILTIN_TOOLS = [
                     "title": {"type": "string", "description": "見出し。"},
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_usage",
+            "description": (
+                "このアプリ自身の使われ方（利用状況）を調べる。分析対象のDBの中身ではなく、"
+                "チャット履歴と取り込みの記録が材料なので、SQLでは答えられない。"
+                "「このアプリはどれくらい使われている？」「誰が使っている？」"
+                "「よく使われる機能は？」「どんな質問が多い？」「どこで失敗している？」"
+                "「カタログのどこを直せばいい？」と聞かれたら使う。"
+                "\n"
+                "method で見る角度を選ぶ。まず summary で全体像を出し、"
+                "気になった点を errors や users で掘るとよい。"
+                "特に errors は失敗を「カタログを直せば減るもの」と"
+                "「モデル・API側の問題」に分けて返すので、改善の打ち手を答えるときに使う。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "enum": [*usage.METHODS, "imports"],
+                        "description": " / ".join(
+                            f"{k}={v}" for k, v in usage.METHODS.items())
+                        + " / imports=取り込みの実行実績",
+                    },
+                    "days": {"type": "integer",
+                             "description": "直近何日ぶんを見るか。省略すると全期間。"},
+                    "user": {"type": "string",
+                             "description": "特定の利用者だけに絞る（ユーザー名）。任意。"},
+                    "title": {"type": "string", "description": "見出し。"},
+                    "purpose": {"type": "string",
+                                "description": "この集計で確認したいことの短い説明。"},
+                },
+                "required": ["method"],
             },
         },
     },

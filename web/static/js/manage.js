@@ -61,14 +61,22 @@ function jobControls(j) {
             }, '今すぐ更新'),
         el('button', {
             class: 'btn btn--sm',
+            title: j.enabled === false
+                ? '自動更新を再開します（次回予定の時刻から動きます）。'
+                : '自動更新を一時的に止めます。設定は残るので、いつでも再開できます。'
+                  + '止めている間は「更新できていない」警告も出ません。',
             onclick: async () => {
                 await api('/api/jobs/update', { id: j.id, enabled: j.enabled === false });
+                toast(j.enabled === false
+                    ? `「${j.name}」の自動更新を再開しました。`
+                    : `「${j.name}」の自動更新を止めました。「再開」でいつでも戻せます。`);
                 MANAGE.refresh();
             },
         }, j.enabled === false ? '再開' : '停止'),
         el('button', {
             class: 'btn btn--sm btn--danger',
-            title: '定期取り込みの設定だけを消します（表とデータは残ります）',
+            title: '定期取り込みの設定だけを消します（テーブルと中のデータは残ります）。'
+                   + 'このテーブルは自動更新されなくなります。',
             onclick: async () => {
                 if (!confirm(`定期取り込み「${j.name}」の設定を削除しますか？\n`
                     + '（テーブルと中のデータは残ります）')) return;
@@ -76,7 +84,7 @@ function jobControls(j) {
                 toast('定期取り込みの設定を削除しました。');
                 MANAGE.refresh();
             },
-        }, '設定'),
+        }, '設定を削除'),
     ];
 }
 

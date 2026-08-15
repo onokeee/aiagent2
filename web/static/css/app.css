@@ -956,6 +956,9 @@ details.acc.is-target {
 .toast--warn { border-left: 3px solid var(--warn); }
 @keyframes toastin { from { opacity: 0; transform: translateY(-8px); } }
 
+/* AIの回答の中の注意書き（※ ⚠ で始まる行）。データの信頼性にかかわるので目立たせる */
+.caveat { color: var(--err); font-weight: 600; }
+
 .spinner {
     width: 15px; height: 15px; border: 2px solid var(--border-2);
     border-top-color: var(--accent); border-radius: 50%;

@@ -12,8 +12,12 @@
 const MANAGE = window.MANAGE || { intervals: [], refresh: () => location.reload() };
 const openTables = new Set();      // 描き直しても開いていたテーブルは開いたまま
 
+/* スケジューラの状態。正常なときは何も出さない（"問題なし"の報告は読む理由がない）。
+   止まっているときだけ帯を出す。設定どおりに更新できていない個々のジョブは、
+   ⚠マーク・AIの注記・管理者メールで別に届く。 */
 function renderSched(s) {
     const box = $('#schedBanner');
+    if (!box) return;
     if (!s.enabled) {
         box.replaceChildren(el('div', { class: 'alert alert--warn' },
             '自動実行は停止しています（.env の IMPORT_SCHEDULER=false）。手動更新はできます。'));
@@ -21,9 +25,7 @@ function renderSched(s) {
         box.replaceChildren(el('div', { class: 'alert alert--err' },
             '自動実行のスレッドが動いていません。アプリを再起動してください。'));
     } else {
-        box.replaceChildren(el('div', { class: 'alert alert--ok' },
-            `自動実行中です（${s.tick_sec}秒ごとに確認 / 最終確認 ${(s.last_tick || '―').replace('T', ' ')}）。`
-            + 'アプリが起動している間、画面を開いていなくても動きます。'));
+        box.replaceChildren();
     }
 }
 

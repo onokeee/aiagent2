@@ -22,12 +22,9 @@
       <a class="navlink {{ 'is-active' if nav.startswith('chat.') }}" href="{{ url_for('chat.index') }}"
          data-desc="データについて日本語で質問すると、AIがSQLを書いて答えます。">
         {{ icon('chat') }} チャット</a>
-      <a class="navlink {{ 'is-active' if nav.startswith('catalog.') }}" href="{{ url_for('catalog.index') }}"
-         data-desc="ここに書いた内容がそのまま AI の理解になります。">
+      <a class="navlink {{ 'is-active' if nav.startswith('catalog.') or nav.startswith('imp.') }}" href="{{ url_for('catalog.index') }}"
+         data-desc="DBとテーブルの説明・結合・用語・例文・ツール・取り込み。ここに書いた内容がそのまま AI の理解になります。">
         {{ icon('catalog') }} データカタログ</a>
-      <a class="navlink {{ 'is-active' if nav.startswith('imp.') }}" href="{{ url_for('imp.index') }}"
-         data-desc="Excel / CSV / TXT から DB とテーブルを作ります。">
-        {{ icon('database') }} データ取り込み</a>
       <a class="navlink {{ 'is-active' if nav.startswith('models.') }}" href="{{ url_for('models.index') }}"
          data-desc="チャット画面で選べるモデルを決めます。">
         {{ icon('model') }} モデル設定</a>

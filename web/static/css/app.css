@@ -439,6 +439,8 @@ table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .tab:hover { color: var(--text); }
 .tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+/* 別画面へ渡すタブ（データカタログ⇄取り込み）はリンクだが、見た目はボタンのタブと揃える */
+a.tab { text-decoration: none; display: inline-block; line-height: normal; }
 
 /* タブと一緒に、右端へ充実度やDB選択を載せる帯（データカタログ）。
    別々の段にすると、それだけで縦を60px以上使ってしまう。

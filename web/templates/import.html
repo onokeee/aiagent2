@@ -1,9 +1,18 @@
 {% extends "base.html" %}
-{% block title %}データ取り込み — {{ app_title }}{% endblock %}
+{% block title %}データカタログ（取り込み） — {{ app_title }}{% endblock %}
 {# 見出しは置かない。画面の説明はサイドバーの項目にマウスを乗せると出る #}
 
 {% block body %}
-<div class="content">
+<div class="content content--wide">
+  {# データカタログの一機能。同じタブバーを出して、行き来が同じ画面の中に見えるようにする。
+     他のタブはカタログ画面（DB別）へ、こちらは全DB共通なのでDB切替は出さない。 #}
+  <div class="tabs tabs--bar">
+    <a class="tab" href="{{ url_for('catalog.index') }}#tab=tables">DB・テーブル</a>
+    <a class="tab" href="{{ url_for('catalog.index') }}#tab=er">結合・ER図</a>
+    <a class="tab" href="{{ url_for('catalog.index') }}#tab=glossary">用語集・例文</a>
+    <a class="tab" href="{{ url_for('catalog.index') }}#tab=tools">ツール</a>
+    <button class="tab is-active">取り込み</button>
+  </div>
 
   <!-- ================= 取り込み ================= -->
   <div id="pane-file">

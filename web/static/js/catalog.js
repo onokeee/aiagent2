@@ -13,7 +13,7 @@ function activateTab(pane) {
     }
     const tab = $(`.tab[data-pane="${pane}"]`);
     if (!tab) return;
-    $$('.tab').forEach(t => t.classList.toggle('is-active', t === tab));
+    $$('.tab[data-pane]').forEach(t => t.classList.toggle('is-active', t === tab));
     $$('.tabpane').forEach(p => p.classList.toggle('is-active', p.id === `pane-${pane}`));
     // ツールはDBに属さない（全DB共通）。DBの切替と充実度メーターを見せたままだと
     // 「選択中のDBのツール」と読めてしまうので、このタブでは隠す。
@@ -53,7 +53,7 @@ function carriedHash() {
 }
 
 function wireTabs() {
-    $$('.tab').forEach(tab => tab.addEventListener('click', () => activateTab(tab.dataset.pane)));
+    $$('.tab[data-pane]').forEach(tab => tab.addEventListener('click', () => activateTab(tab.dataset.pane)));
     // activateTab はハッシュを書き換えるので、必要な値は先に全部読んでおく
     const hash = location.hash;
     const sec = hash.match(/sec=(\w+)/);

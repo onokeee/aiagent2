@@ -670,9 +670,11 @@ def _open_table(args: dict, scope: list[dict]) -> dict:
         "llm_content": _json({
             "status": "table_view_opened", "db": target.name, "table": table,
             "rows": rows, "columns": cols,
-            "note": "テーブルの全行を見る画面を利用者の画面に出した（別タブで開く）。"
+            "note": "テーブルの全行を見る画面へのリンク（「テーブル全体を開く」ボタン）を"
+                    "利用者のチャットに出した。利用者がそれを押すと別タブで開く。"
                     "中身を SELECT * で貼り直す必要はない。"
-                    "何のテーブルか・何に使えるかを1〜2文で補足するだけでよい。",
+                    "何のテーブルか・何に使えるかを1〜2文で補足し、"
+                    "「テーブル全体を開く」から見られることを伝えるだけでよい。",
         }),
         "render": {
             "role": "assistant", "kind": "table_link",

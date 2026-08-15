@@ -48,8 +48,6 @@
       <select id="dbSel" style="width:auto">
         {% for f in db_files %}<option value="{{ f }}" {{ 'selected' if f == target }}>{{ f }}</option>{% endfor %}
       </select>
-      <button type="button" class="btn btn--sm hastip" id="reprofile"
-              data-tip="DBを開き直して、列の定義・外部キー・行数・サンプル行・列の値の分布を調べ直します。手で書いた説明・用語集・結合定義は消えません。&#10;&#10;取り込みなどで中身が変われば自動で作り直されるので、ふだん押す必要はありません。アプリを通さず直接DBを書き換えたときや、巨大なテーブルで前回タイムアウトしたときに使います。">プロファイル再生成</button>
     </div>
   </div>
 

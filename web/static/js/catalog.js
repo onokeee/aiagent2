@@ -1849,14 +1849,6 @@ function wireMisc() {
         leavingOnPurpose = true;
         location.href = `?db=${encodeURIComponent(ev.target.value)}${carriedHash()}`;
     });
-    $('#reprofile')?.addEventListener('click', async ev => {
-        ev.target.disabled = true;
-        try {
-            await api('/api/catalog/profile', { db: CAT.db });
-            leavingOnPurpose = true;
-            window.location.reload();
-        } catch (e) { toast(e.message, 'err'); ev.target.disabled = false; }
-    });
     $$('.sug-add').forEach(b => b.addEventListener('click', async () => {
         const [ft, fc] = b.dataset.from.split('.');
         const parts = b.dataset.to.split('.');

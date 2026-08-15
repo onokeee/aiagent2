@@ -1034,11 +1034,3 @@ def save_builtin():
     meta["builtin_tools"] = over
     catalog.save_meta(path, meta)
     return jsonify({"ok": True})
-
-
-@bp.post("/api/catalog/profile")
-@admin_required
-def reprofile():
-    path = db.path_for((request.json or {})["db"])
-    catalog.profile_db(path, force=True)
-    return jsonify({"ok": True})

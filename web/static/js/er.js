@@ -880,7 +880,6 @@ const ER = (() => {
         $('#erSave')?.addEventListener('click', saveLayout);
         $('#erUndo')?.addEventListener('click', undo);
         $('#erRedo')?.addEventListener('click', redo);
-        $('#erFit')?.addEventListener('click', fit);
         $('#erFull')?.addEventListener('click', () => {
             root.classList.toggle('er--full');
             $('#erFull').textContent = root.classList.contains('er--full') ? '全画面を終了' : '全画面';

@@ -269,7 +269,6 @@ function openErModal(item) {
         el('div', { class: 'modal__body', style: 'padding:10px' },
             el('div', { class: 'er er--chat', id: 'erRoot' },
                 el('div', { class: 'er__toolbar' },
-                    el('button', { class: 'btn btn--sm', id: 'erFit' }, '全体を表示'),
                     el('button', { class: 'btn btn--sm', id: 'erFull' }, '全画面')),
                 el('div', { class: 'er__viewport', id: 'erViewport' },
                     svgEl,

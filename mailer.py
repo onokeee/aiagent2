@@ -610,6 +610,10 @@ def send(draft: dict, attachments: list[dict] | None = None,
 
     if s.dry_run:
         record.update(ok=True, message="下書きの確認のみ（SMTP_DRY_RUN=true のため送信していません）")
+        # 送らない代わりに、文面をサーバのログに残す（通知の中身を SMTP 無しで確かめるため）
+        body_lines = "\n".join("  | " + l for l in str(draft.get("body") or "").splitlines())
+        print(f"[mailer] DRY RUN → {', '.join(record['to'])}\n件名: {msg['Subject']}\n{body_lines}",
+              flush=True)
     else:
         try:
             server = _connect(s)
@@ -693,18 +697,26 @@ def alert_import_problems(current: list[dict], previous: list[dict]) -> dict | N
     if newly:
         lines.append("■ 設定どおりに更新できなくなった定期取り込み")
         for p in newly:
-            lines.append(f"  ・{p['name']}（{p['db_file']} / {p['table']}）")
+            tag = {"failed": "失敗", "degraded": "値の型がずれた", "overdue": "動いていない"}.get(p.get("kind"), "")
+            lines.append(f"  ・{p['name']}（{p['db_file']} / {p['table']}）{'［' + tag + '］' if tag else ''}")
             lines.append(f"     {p['message']}")
         lines.append("")
-        lines.append("  対処: 取り込み元のファイル・シート名・列構成を確認してください。")
-        lines.append("  失敗している間、既存のデータは変わりません（前回の内容のまま残っています）。")
+        kinds = {p.get("kind") for p in newly}
+        if "failed" in kinds:
+            lines.append("  失敗: 取り込み元のファイル・シート名・列構成を確認してください。"
+                         "失敗している間、そのテーブルは前回の内容のまま変わりません。")
+        if "degraded" in kinds:
+            lines.append("  値の型がずれた: 取り込みはできていますが、数値の列に文字が混ざったため"
+                         "文字として保存しました。元ファイルの値を直して次回の実行を待ってください。")
+        if "overdue" in kinds:
+            lines.append("  動いていない: アプリが起動しているか、自動実行が止まっていないか確認してください。")
         lines.append("")
     if fixed:
         lines.append("■ 復旧した定期取り込み")
         for p in fixed:
             lines.append(f"  ・{p['name']}（{p['db_file']} / {p['table']}）")
         lines.append("")
-    lines.append(f"確認: データカタログ > DB・テーブル > 各テーブルの「管理」")
+    lines.append("確認: データカタログ > DB・テーブル > 各テーブルの「管理」")
     subject = ("[DB分析アシスタント] 定期取り込みが失敗しています"
                if newly else "[DB分析アシスタント] 定期取り込みが復旧しました")
     draft = {"to": list(s.alert_to), "subject": subject, "body": "\n".join(lines)}

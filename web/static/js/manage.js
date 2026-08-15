@@ -101,9 +101,21 @@ function jobDetail(j, withName) {
         kv('開始日時', (j.start_at || '').replace('T', ' ') || '（すぐ対象）'),
         kv('次回予定', j.next_label, true),
         kv('前回実行', (j.last_run || '').replace('T', ' ')),
-        kv('前回結果', j.last_status === 'ok'? `${j.last_message || '' }`
-            : j.last_status === 'error'? `${j.last_message || '' }` : '―'),
         kv('状態', j.enabled === false ? '停止中' : '有効'));
+    // 前回の結果。失敗（赤）と要確認（黄＝数値列が文字に落ちた）は、文章を読まなくても
+    // 分かるように色を付ける。成功はそのまま小さく出す。
+    if (j.last_status === 'error') {
+        box.append(el('div', { class: 'alert alert--err small', style: 'margin-top:6px' },
+            el('b', {}, '前回の更新に失敗しています'),
+            el('div', { style: 'margin-top:2px' }, j.last_message || '')));
+    } else if ((j.last_degraded || []).length) {
+        box.append(el('div', { class: 'alert alert--warn small', style: 'margin-top:6px' },
+            el('b', {}, `数値にできない値がありました（${j.last_degraded.join('、')}）`),
+            el('div', { style: 'margin-top:2px' },
+                '文字として保存したので、合計や平均がずれる可能性があります。元ファイルの値を確認してください。')));
+    } else {
+        box.append(kv('前回結果', j.last_message || '―'));
+    }
     if (j.mode === 'append') box.append(kv('保存回数', `${j.keep_runs} 回まで`, true));
     if (j.manual_blocked) {
         box.append(el('div', { class: 'small muted mt' }, ''+ j.manual_blocked));

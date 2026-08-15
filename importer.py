@@ -468,6 +468,37 @@ DELIMITERS = {
 }
 
 
+def _explain_read_error(e: Exception, path: Path, sheet: str | None) -> str:
+    """pandas / OS の例外を、管理者がそのまま対処できる日本語にする。
+
+    定期取り込みの失敗はメール・⚠マーク・AIの注記にこの文がそのまま載るので、
+    'No columns to parse from file' のような英語のままでは何をすればよいか分からない。
+    """
+    name = path.name
+    if isinstance(e, PermissionError):
+        return (f"{name} を開けません。他のプログラム（Excel など）で開かれているか、"
+                "読み取り権限がありません。閉じてから、次回の実行を待つか「今すぐ更新」してください。")
+    if isinstance(e, FileNotFoundError):
+        return f"{name} が見つかりません（移動・削除された可能性）。"
+    msg = str(e)
+    if "No columns to parse" in msg or isinstance(e, pd.errors.EmptyDataError):
+        return f"{name} の中身が空です（0バイト、または見出し行がありません）。"
+    if "Worksheet named" in msg or "Worksheet index" in msg:
+        try:
+            names = _sheet_names_of(path)
+            have = "、".join(names) if names else "（なし）"
+        except Exception:
+            have = "（不明）"
+        return (f"シート「{sheet}」が {name} にありません（シート名が変わった可能性）。"
+                f"いまあるシート: {have}。設定のシートを直してください。")
+    if "BadZipFile" in type(e).__name__ or "not a zip file" in msg.lower() or "File is not a zip file" in msg:
+        return (f"{name} を Excel ファイルとして開けません（壊れているか、拡張子だけ .xlsx の別形式）。"
+                "Excel で開いて保存し直してください。")
+    if isinstance(e, pd.errors.ParserError):
+        return f"{name} を表として読めませんでした（行ごとの列数が揃っていない等）: {msg}"
+    return f"{name} を読めませんでした: {msg}"
+
+
 def read_table(path: Path, sheet: str | None = None, header_row: int = 0,
                encoding: str | None = None, nrows: int | None = None,
                delimiter: str | None = None) -> pd.DataFrame:
@@ -483,6 +514,8 @@ def read_table(path: Path, sheet: str | None = None, header_row: int = 0,
             df = pd.read_excel(path, sheet_name=sheet or 0, header=header_row,
                                nrows=nrows, dtype=object)
         else:
+            if path.stat().st_size == 0:
+                raise ImportError_(f"{path.name} の中身が空です（0バイト）。")
             sep = delimiter if delimiter else ("\t" if ext == ".tsv" else None)
             last = None
             for enc in ([encoding] if encoding else CSV_ENCODINGS):
@@ -494,15 +527,16 @@ def read_table(path: Path, sheet: str | None = None, header_row: int = 0,
                     last = e
             else:
                 raise ImportError_(
-                    "文字コードを判定できませんでした。UTF-8 か Shift_JIS で保存し直してください。"
+                    f"{path.name} の文字コードを判定できませんでした。テキスト（CSV）ではないか、"
+                    "壊れている可能性があります。UTF-8 か Shift_JIS で保存し直してください。"
                     f"（{last}）")
     except ImportError_:
         raise
     except Exception as e:
-        raise ImportError_(f"ファイルを読めませんでした: {e}") from e
+        raise ImportError_(_explain_read_error(e, path, sheet)) from e
 
     if df.empty and not len(df.columns):
-        raise ImportError_("中身が空のようです（見出し行の指定を確認してください）。")
+        raise ImportError_(f"{path.name} の中身が空のようです（見出し行の指定を確認してください）。")
     return df
 
 

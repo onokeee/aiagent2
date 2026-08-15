@@ -196,7 +196,11 @@ def jsonable(value):
         return {str(k): jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [jsonable(v) for v in value]
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if isinstance(value, float):
+        # NaN / inf は JSON に無い（Excel の空セルは pandas で NaN になる）。
+        # そのまま dumps すると "NaN" という不正なJSONになり、ブラウザ側で読めない。
+        return None if (value != value or value in (float("inf"), float("-inf"))) else value
+    if value is None or isinstance(value, (str, int, bool)):
         return value
     return str(value)
 

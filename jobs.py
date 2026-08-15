@@ -255,10 +255,12 @@ def due_jobs(now: datetime | None = None) -> list[dict]:
 def problems() -> list[dict]:
     """設定どおりに更新できていない定期取り込み。
 
-    2種類ある:
-      failed  … 前回の実行が失敗した（ファイルが無い・シート名や列が変わった等）
-      overdue … 有効な自動実行なのに、予定の2周期ぶん以上動いていない
-                （スケジューラが止まっている・アプリが落ちていた等）
+    3種類ある:
+      failed   … 前回の実行が失敗した（ファイルが無い・シート名や列が変わった等）
+      degraded … 取り込めたが、数値列に文字が混ざって文字として保存した
+                 （合計・平均がずれる。元ファイルの値を直すべき）
+      overdue  … 有効な自動実行なのに、予定の2周期ぶん以上動いていない
+                 （スケジューラが止まっている・アプリが落ちていた等）
     戻り値: [{id, name, db_file, table, kind, since, message}, ...]
     """
     now = datetime.now()
@@ -271,6 +273,15 @@ def problems() -> list[dict]:
                         "db_file": j.get("db_file"), "table": j.get("table"),
                         "kind": "failed", "since": j.get("last_run") or "",
                         "message": j.get("last_message") or "前回の実行が失敗しました。"})
+            continue
+        if j.get("last_degraded"):
+            cols = "、".join(str(c) for c in j["last_degraded"])
+            out.append({"id": j.get("id"), "name": j.get("name"),
+                        "db_file": j.get("db_file"), "table": j.get("table"),
+                        "kind": "degraded", "since": j.get("last_run") or "",
+                        "message": (f"前回の取り込みで、数値の列（{cols}）に数値でない値が混ざり、"
+                                    "文字として保存しました。合計や平均がずれる可能性があります。"
+                                    "元ファイルの値を確認してください。")})
             continue
         minutes = int(j.get("interval_minutes") or 0)
         last = parse_dt(j.get("last_run"))
@@ -334,6 +345,14 @@ def _run_job_locked(job: dict, kind: str = "auto", user: str | None = None) -> d
             cols = importer.plan_columns(df)
         missing = [c["元の列名"] for c in cols if c["元の列名"] not in df.columns]
         if missing:
+            if len(missing) == len(cols):
+                # 1列も合わない＝列名の変更ではなく、区切り文字か見出し行の位置が変わった
+                found = "、".join(str(c) for c in list(df.columns)[:5])
+                raise importer.ImportError_(
+                    f"設定した列が1つも見つかりません（ファイル側の見出し: {found}"
+                    f"{' …' if len(df.columns) > 5 else ''}）。"
+                    "区切り文字・見出し行の位置・シートが変わった可能性があります。"
+                    "取り込み画面で開き直して設定を作り直してください。")
             raise importer.ImportError_(
                 f"ファイル側に無い列があります: {', '.join(missing)}。"
                 "列構成が変わった可能性があります。設定を作り直してください。")
@@ -341,12 +360,24 @@ def _run_job_locked(job: dict, kind: str = "auto", user: str | None = None) -> d
         db_path = config.DATA_DIR / job["db_file"]
         mode = job.get("mode") or "replace"
         ts_col = job.get("timestamp_column") or config.IMPORT_TIMESTAMP_COLUMN
+        if len(df) == 0:
+            # 見出しだけのファイル（上流の出力が失敗した等）で洗い替えると、
+            # テーブルが空になり「成功」で終わる。前回の内容を残して止める。
+            # 本当に0件にしたいときは、取り込み画面から手で洗い替える。
+            raise importer.ImportError_(
+                f"{path.name} にデータ行がありません（見出しだけ）。"
+                f"{'テーブルを空にしないため、前回の内容を残しました。' if mode != 'append' else '追記する行が無いため何もしていません。'}"
+                "本当に0件なら、取り込み画面から手で洗い替えてください。")
         n, degraded = importer.import_dataframe(
             db_path, job["table"], df, cols, mode=mode,
             timestamp_col=ts_col,
             timestamp_value=started.isoformat(timespec="seconds"),
         )
         message = f"{n:,}行を{'追記' if mode == 'append' else '洗い替え'}しました。"
+        if degraded:
+            # 数値列に文字が混ざった。取り込み自体は通るが集計がずれるので、黙って通さない
+            message += (f" ⚠ 数値にできない値があったため文字として保存した列: {', '.join(degraded)}"
+                        "（元ファイルの値を確認してください）")
 
         # 追記のときは、保存回数を超えた古い取り込み分を落とす
         if mode == "append" and ts_col and job.get("keep_runs"):
@@ -368,6 +399,7 @@ def _run_job_locked(job: dict, kind: str = "auto", user: str | None = None) -> d
         "last_status": "ok" if result["ok"] else "error",
         "last_message": result["message"],
         "last_rows": result["rows"],
+        "last_degraded": list(result.get("degraded") or []),
     })
     save_job(saved)
     history.add(job.get("db_file", ""), job.get("table", ""),

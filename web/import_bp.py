@@ -107,7 +107,8 @@ def _job_row(j: dict) -> dict:
     # 画面はこれらのキーを必ず読むので、古い定義や手書きのジョブでも欠けないよう埋める
     defaults = {"sheet": None, "delimiter": None, "header_row": 0, "start_at": "",
                 "timestamp_column": None, "keep_runs": None, "enabled": True,
-                "last_run": "", "last_status": "", "last_message": "", "columns": []}
+                "last_run": "", "last_status": "", "last_message": "", "columns": [],
+                "last_degraded": []}
     return {**defaults, **j,
             "interval_label": jobs.interval_label(j.get("interval_minutes", 0)),
             "mode_label": "追記" if j.get("mode") == "append" else "洗い替え",
